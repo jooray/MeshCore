@@ -266,6 +266,15 @@ bool BitchatProtocol::parseMessage(const uint8_t* data, size_t length, BitchatMe
                 return false;
             }
 
+            // Bounds check: ensure decompressed data fits in payload buffer
+            if (outBytes > BITCHAT_MAX_PAYLOAD_SIZE) {
+                Serial.printf("ERROR: Decompressed size %u exceeds buffer %u!\n",
+                              (unsigned)outBytes, (unsigned)BITCHAT_MAX_PAYLOAD_SIZE);
+                free(decomp);
+                free(decompBuffer);
+                return false;
+            }
+
             // Copy decompressed data to message payload
             size_t decompressedLen = outBytes;
             memcpy(msg.payload, decompBuffer, decompressedLen);

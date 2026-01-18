@@ -339,6 +339,17 @@ void BitchatBLEService::onConnect(uint16_t conn_handle) {
     if (_instance != nullptr) {
         _instance->_bitchatClientCount++;
         _instance->_pendingConnect = true;
+
+        // Log connection parameters for debugging
+        BLEConnection* conn = Bluefruit.Connection(conn_handle);
+        if (conn) {
+            BITCHAT_DEBUG_PRINTLN("=== Connection established ===");
+            BITCHAT_DEBUG_PRINTLN("Connection interval: %.1f ms", conn->getConnectionInterval() * 1.25);
+            BITCHAT_DEBUG_PRINTLN("Slave latency: %d", conn->getSlaveLatency());
+            BITCHAT_DEBUG_PRINTLN("Supervision timeout: %d ms", conn->getSupervisionTimeout() * 10);
+            BITCHAT_DEBUG_PRINTLN("MTU: %d", conn->getMtu());
+        }
+
         BITCHAT_DEBUG_PRINTLN("BLE client connected");
     }
 }
@@ -346,14 +357,25 @@ void BitchatBLEService::onConnect(uint16_t conn_handle) {
 void BitchatBLEService::onDisconnect(uint16_t conn_handle, uint8_t reason) {
     if (_instance != nullptr) {
         _instance->onServerDisconnect();
-        BITCHAT_DEBUG_PRINTLN("BLE client disconnected, reason=0x%02X", reason);
+        const char* reasonStr;
+        switch(reason) {
+            case 0x08: reasonStr = "Connection timeout"; break;
+            case 0x13: reasonStr = "Remote user terminated"; break;
+            case 0x16: reasonStr = "Local host terminated"; break;
+            case 0x22: reasonStr = "LL Response timeout"; break;
+            case 0x3E: reasonStr = "Connection failed to establish"; break;
+            default: reasonStr = "Unknown"; break;
+        }
+        BITCHAT_DEBUG_PRINTLN("BLE client disconnected, reason=0x%02X (%s)", reason, reasonStr);
     }
 }
 
 void BitchatBLEService::onCharacteristicWrite(uint16_t conn_handle, BLECharacteristic* chr, uint8_t* data, uint16_t len) {
-    BITCHAT_DEBUG_PRINTLN("BLE WRITE received: %u bytes", len);
+    Serial.print("BLE_WRITE_CB: len=");
+    Serial.println(len);
 
     if (_instance == nullptr || len == 0) {
+        Serial.println("BLE_WRITE_CB: null instance or zero len");
         return;
     }
 
@@ -363,14 +385,15 @@ void BitchatBLEService::onCharacteristicWrite(uint16_t conn_handle, BLECharacter
     // Append to write buffer
     size_t copyLen = len;
     if (_instance->_writeBufferOffset + copyLen > sizeof(_instance->_writeBuffer)) {
-        BITCHAT_DEBUG_PRINTLN("Write buffer overflow, clearing");
+        Serial.println("BLE_WRITE_CB: buffer overflow, clearing");
         _instance->clearWriteBuffer();
         copyLen = (len > sizeof(_instance->_writeBuffer)) ? sizeof(_instance->_writeBuffer) : len;
     }
 
     memcpy(&_instance->_writeBuffer[_instance->_writeBufferOffset], data, copyLen);
     _instance->_writeBufferOffset += copyLen;
-    BITCHAT_DEBUG_PRINTLN("Write buffer now has %u bytes", (unsigned)_instance->_writeBufferOffset);
+    Serial.print("BLE_WRITE_CB: buffer now ");
+    Serial.println(_instance->_writeBufferOffset);
 }
 
 void BitchatBLEService::onCharacteristicCccdWrite(uint16_t conn_handle, BLECharacteristic* chr, uint16_t cccd_value) {

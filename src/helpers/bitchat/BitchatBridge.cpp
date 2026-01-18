@@ -1306,11 +1306,16 @@ void BitchatBridge::relayChannelMessageToMesh(const BitchatMessage& msg, const c
 
     // Calculate number of parts needed
     int numParts = (contentLen + MAX_CHUNK_SIZE - 1) / MAX_CHUNK_SIZE;
-    if (numParts > 9) {
-        numParts = 9;  // Cap at 9 parts to keep indicator short
+    bool truncated = false;
+    if (numParts > (int)MAX_MESSAGE_PARTS) {
+        Serial.printf("BITCHAT_BRIDGE: WARNING - Message too long (%d bytes), truncating from %d to %d parts\n",
+                      (int)contentLen, numParts, (int)MAX_MESSAGE_PARTS);
+        numParts = MAX_MESSAGE_PARTS;  // Cap for reliability over LoRa
+        truncated = true;
     }
 
-    BITCHAT_DEBUG_PRINTLN("Splitting message from %s into %d parts (len=%d)", senderNick, numParts, (int)contentLen);
+    BITCHAT_DEBUG_PRINTLN("Splitting message from %s into %d parts (len=%d%s)",
+                          senderNick, numParts, (int)contentLen, truncated ? ", TRUNCATED" : "");
 
     // Send part 1 immediately, queue remaining parts for delayed sending
     // This avoids overwhelming the mesh packet pool which can silently drop delayed packets
@@ -1483,9 +1488,11 @@ void BitchatBridge::handleFragment(const BitchatMessage& msg) {
         memcpy(reassembled.recipientId, msg.recipientId, 8);
 
         // Copy reassembled data to payload
-        // Note: For very long messages, we may need to split into multiple mesh messages
+        // Note: For very long messages, we truncate to avoid buffer overflow
         size_t copyLen = buf->dataLen;
         if (copyLen > BITCHAT_MAX_PAYLOAD_SIZE) {
+            Serial.printf("WARNING: Truncating reassembled message from %u to %u bytes\n",
+                          (unsigned)copyLen, (unsigned)BITCHAT_MAX_PAYLOAD_SIZE);
             copyLen = BITCHAT_MAX_PAYLOAD_SIZE;
         }
         memcpy(reassembled.payload, buf->data, copyLen);

@@ -436,7 +436,8 @@ private:
         char text[180];         // Part text with "[X/Y] " indicator
         bool valid;
     };
-    static const size_t MAX_PENDING_PARTS = 8;
+    static const size_t MAX_PENDING_PARTS = 8;  // Queue size (parts 2-8 queued, part 1 sent immediately)
+    static const size_t MAX_MESSAGE_PARTS = 8;  // Max parts per message (~1KB) - more is unreliable over LoRa
     static const uint32_t PART_SEND_DELAY_MS = 5000;  // Delay between parts
     PendingPart _pendingParts[MAX_PENDING_PARTS];
     size_t _pendingPartsHead;        // Next part to send
