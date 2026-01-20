@@ -482,7 +482,8 @@ void BitchatProtocol::computePacketId(const BitchatMessage& msg, uint8_t* outId1
     // Used by GCS filter to detect which messages the requester already has.
 
     // Build the data to hash: type(1) + senderId(8) + timestamp(8 BE) + payload
-    uint8_t hashInput[1 + BITCHAT_SENDER_ID_SIZE + 8 + BITCHAT_MAX_PAYLOAD_SIZE];
+    // Static to avoid ~2KB stack allocation on NRF52
+    static uint8_t hashInput[1 + BITCHAT_SENDER_ID_SIZE + 8 + BITCHAT_MAX_PAYLOAD_SIZE];
     size_t offset = 0;
 
     // Type (1 byte)

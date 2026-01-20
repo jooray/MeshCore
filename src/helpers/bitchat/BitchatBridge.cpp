@@ -122,10 +122,18 @@ BitchatBridge::BitchatBridge(mesh::Mesh& mesh, mesh::LocalIdentity& identity, co
     // Initialize pending parts queue
     for (size_t i = 0; i < MAX_PENDING_PARTS; i++) {
         _pendingParts[i].valid = false;
+        _pendingParts[i].originalTimestamp = 0;
     }
     _pendingPartsHead = 0;
     _pendingPartsTail = 0;
     _lastPartSentTime = 0;
+
+    // Initialize pending relays queue (multi-bridge dedup)
+    for (size_t i = 0; i < MAX_PENDING_RELAYS; i++) {
+        _pendingRelays[i].valid = false;
+        _pendingRelays[i].bitchatTimestamp = 0;
+        _pendingRelays[i].sendAtMillis = 0;
+    }
 }
 
 void BitchatBridge::begin() {
@@ -418,6 +426,9 @@ void BitchatBridge::deriveNoisePublicKey(const uint8_t* ed25519PubKey, uint8_t* 
 void BitchatBridge::loop() {
 #if defined(ESP32) || defined(NRF52_PLATFORM)
     _bleService.loop();
+
+    // Process pending relays (multi-bridge collision avoidance with random delay)
+    processPendingRelays();
 
     // Process pending multi-part messages
     processPendingParts();
@@ -1004,6 +1015,17 @@ void BitchatBridge::processBitchatMessage(const BitchatMessage& msg) {
                     break;
                 }
 
+                // Multi-bridge loop prevention: Check if message appears to be a MeshCore
+                // relay from another bridge. Format: "<senderName> message" indicates this
+                // message originated from MeshCore and was relayed to Bitchat by another bridge.
+                if (content[0] == '<') {
+                    const char* closeBracket = strchr(content, '>');
+                    if (closeBracket != nullptr && closeBracket[1] == ' ') {
+                        BITCHAT_DEBUG_PRINTLN("Skipping relay - appears to be MeshCore echo from another bridge");
+                        break;
+                    }
+                }
+
                 // Add to message history for REQUEST_SYNC responses
                 addToMessageHistory(msg);
                 BITCHAT_DEBUG_PRINTLN("Added message to history cache");
@@ -1192,7 +1214,7 @@ bool BitchatBridge::parseBitchatMessageTLV(const uint8_t* payload, size_t payloa
     return senderNick[0] != '\0';  // At minimum we need a sender
 }
 
-void BitchatBridge::sendSingleMessageToMesh(const char* senderNick, const char* text) {
+void BitchatBridge::sendSingleMessageToMesh(const char* senderNick, const char* text, uint32_t originalTimestamp) {
     // This is the internal function that sends a single message chunk to the mesh.
     // The caller is responsible for message splitting if needed.
 
@@ -1205,15 +1227,17 @@ void BitchatBridge::sendSingleMessageToMesh(const char* senderNick, const char* 
     // Use the #mesh channel for all bridged messages
     mesh::GroupChannel targetChannel = _meshChannel;
 
-    // Get timestamp - prefer synced Bitchat time over RTC
-    // MeshCore uses Unix seconds, Bitchat uses Unix milliseconds
-    uint32_t timestamp = 0;
-    if (_timeSynced) {
-        // Use synced Bitchat time (convert from ms to seconds)
-        timestamp = static_cast<uint32_t>(getCurrentTimeMs() / 1000ULL);
-    } else {
-        mesh::RTCClock* rtc = _mesh.getRTCClock();
-        timestamp = rtc ? rtc->getCurrentTime() : 0;
+    // Use original Bitchat timestamp for deterministic packet hashing (multi-bridge dedup)
+    // This ensures all bridges produce identical packets → MeshCore dedup catches duplicates
+    uint32_t timestamp = originalTimestamp;
+
+    // Sanity check: if timestamp is invalid, fall back to current time
+    uint32_t now = _timeSynced ? static_cast<uint32_t>(getCurrentTimeMs() / 1000ULL)
+                               : (_mesh.getRTCClock() ? _mesh.getRTCClock()->getCurrentTime() : 0);
+    if (timestamp == 0 || timestamp > now + 60 || timestamp < now - 3600) {
+        // Timestamp invalid (0, >1min in future, or >1hr in past) - use current time
+        BITCHAT_DEBUG_PRINTLN("Invalid original timestamp %u, using current %u", timestamp, now);
+        timestamp = now;
     }
 
     // Build Meshcore group message payload
@@ -1271,7 +1295,7 @@ void BitchatBridge::sendSingleMessageToMesh(const char* senderNick, const char* 
     }
 }
 
-bool BitchatBridge::queueMessagePart(const char* senderNick, const char* text) {
+bool BitchatBridge::queueMessagePart(const char* senderNick, const char* text, uint32_t originalTimestamp) {
     // Find next available slot in circular queue
     size_t nextTail = (_pendingPartsTail + 1) % MAX_PENDING_PARTS;
     if (nextTail == _pendingPartsHead && _pendingParts[_pendingPartsTail].valid) {
@@ -1288,6 +1312,7 @@ bool BitchatBridge::queueMessagePart(const char* senderNick, const char* text) {
             sizeof(_pendingParts[_pendingPartsTail].text) - 1);
     _pendingParts[_pendingPartsTail].text[sizeof(_pendingParts[_pendingPartsTail].text) - 1] = '\0';
 
+    _pendingParts[_pendingPartsTail].originalTimestamp = originalTimestamp;
     _pendingParts[_pendingPartsTail].valid = true;
     _pendingPartsTail = nextTail;
 
@@ -1311,19 +1336,107 @@ void BitchatBridge::processPendingParts() {
     if (_pendingParts[_pendingPartsHead].valid) {
         BITCHAT_DEBUG_PRINTLN("Sending queued part: %s", _pendingParts[_pendingPartsHead].text);
         sendSingleMessageToMesh(_pendingParts[_pendingPartsHead].senderNick,
-                                 _pendingParts[_pendingPartsHead].text);
+                                 _pendingParts[_pendingPartsHead].text,
+                                 _pendingParts[_pendingPartsHead].originalTimestamp);
         _pendingParts[_pendingPartsHead].valid = false;
         _pendingPartsHead = (_pendingPartsHead + 1) % MAX_PENDING_PARTS;
         _lastPartSentTime = now;
     }
 }
 
+bool BitchatBridge::queuePendingRelay(const char* senderNick, const char* content, uint32_t bitchatTimestamp) {
+    // Multi-bridge collision avoidance: queue message with random delay before relaying
+    // This spreads out transmission attempts across bridges, avoiding RF collision
+
+    // Find an empty slot
+    int emptySlot = -1;
+    for (size_t i = 0; i < MAX_PENDING_RELAYS; i++) {
+        if (!_pendingRelays[i].valid) {
+            emptySlot = i;
+            break;
+        }
+    }
+
+    if (emptySlot < 0) {
+        // Queue full - drop oldest entry and use that slot
+        uint32_t oldest = UINT32_MAX;
+        int oldestIdx = 0;
+        for (size_t i = 0; i < MAX_PENDING_RELAYS; i++) {
+            if (_pendingRelays[i].sendAtMillis < oldest) {
+                oldest = _pendingRelays[i].sendAtMillis;
+                oldestIdx = i;
+            }
+        }
+        BITCHAT_DEBUG_PRINTLN("Pending relay queue full, dropping oldest entry");
+        emptySlot = oldestIdx;
+    }
+
+    // Store the pending relay
+    strncpy(_pendingRelays[emptySlot].senderNick, senderNick,
+            sizeof(_pendingRelays[emptySlot].senderNick) - 1);
+    _pendingRelays[emptySlot].senderNick[sizeof(_pendingRelays[emptySlot].senderNick) - 1] = '\0';
+
+    strncpy(_pendingRelays[emptySlot].content, content,
+            sizeof(_pendingRelays[emptySlot].content) - 1);
+    _pendingRelays[emptySlot].content[sizeof(_pendingRelays[emptySlot].content) - 1] = '\0';
+
+    _pendingRelays[emptySlot].bitchatTimestamp = bitchatTimestamp;
+
+    // Random delay between 0 and MAX_RELAY_DELAY_MS milliseconds
+    uint32_t randomDelay = random(0, MAX_RELAY_DELAY_MS);
+    _pendingRelays[emptySlot].sendAtMillis = millis() + randomDelay;
+    _pendingRelays[emptySlot].valid = true;
+
+    BITCHAT_DEBUG_PRINTLN("Queued relay with %ums delay (multi-bridge dedup)", randomDelay);
+    return true;
+}
+
+void BitchatBridge::processPendingRelays() {
+    // Process pending relay queue - called from loop()
+    // Sends queued messages when their delay has elapsed
+
+    uint32_t now = millis();
+
+    for (size_t i = 0; i < MAX_PENDING_RELAYS; i++) {
+        if (_pendingRelays[i].valid && now >= _pendingRelays[i].sendAtMillis) {
+            // Time to send this relay
+            BITCHAT_DEBUG_PRINTLN("Processing pending relay (ts=%u)", _pendingRelays[i].bitchatTimestamp);
+
+            // Call the internal relay function that handles message splitting
+            relayChannelMessageToMesh_Internal(
+                _pendingRelays[i].senderNick,
+                _pendingRelays[i].content,
+                _pendingRelays[i].bitchatTimestamp
+            );
+
+            // Mark as processed
+            _pendingRelays[i].valid = false;
+        }
+    }
+}
+
 void BitchatBridge::relayChannelMessageToMesh(const BitchatMessage& msg, const char* channelName,
                                                const char* senderNick, const char* text) {
-    // Find the MeshCore channel for this Bitchat channel
-    mesh::GroupChannel targetChannel;
-    if (!findMeshChannel(channelName, targetChannel)) {
-        BITCHAT_DEBUG_PRINTLN("No channel mapping for '%s' - check registerChannelMapping()", channelName);
+    // Multi-bridge duplicate relay prevention:
+    // Queue the message with a random delay instead of sending immediately.
+    // This spreads out transmission attempts across bridges, avoiding RF collision.
+    // Using the original Bitchat timestamp ensures all bridges produce identical packets
+    // so MeshCore dedup can catch any duplicates that do make it through.
+
+    // Extract original Bitchat timestamp (convert from ms to seconds)
+    uint32_t bitchatTimestamp = static_cast<uint32_t>(msg.timestamp / 1000ULL);
+
+    // Queue for delayed relay
+    queuePendingRelay(senderNick, text, bitchatTimestamp);
+}
+
+void BitchatBridge::relayChannelMessageToMesh_Internal(const char* senderNick, const char* text, uint32_t originalTimestamp) {
+    // Internal function that actually relays the message to MeshCore
+    // Called from processPendingRelays() after the random delay has elapsed
+
+    // We only relay #mesh channel, so use it directly
+    if (!_meshChannelConfigured) {
+        BITCHAT_DEBUG_PRINTLN("#mesh channel not configured, cannot relay");
         return;
     }
 
@@ -1338,7 +1451,7 @@ void BitchatBridge::relayChannelMessageToMesh(const BitchatMessage& msg, const c
 
     if (contentLen <= MAX_CHUNK_SIZE) {
         // Single message - no splitting needed
-        sendSingleMessageToMesh(senderNick, text);
+        sendSingleMessageToMesh(senderNick, text, originalTimestamp);
         return;
     }
 
@@ -1427,12 +1540,13 @@ void BitchatBridge::relayChannelMessageToMesh(const BitchatMessage& msg, const c
         BITCHAT_PACKETDUMP("SPLIT_PART", (const uint8_t*)chunk, strlen(chunk));
 
         if (part == 0) {
-            // Send first part immediately
-            sendSingleMessageToMesh(senderNick, chunk);
+            // Send first part immediately (with original timestamp for multi-bridge dedup)
+            sendSingleMessageToMesh(senderNick, chunk, originalTimestamp);
             _lastPartSentTime = millis();  // Start the timer for subsequent parts
         } else {
             // Queue remaining parts for delayed sending via processPendingParts()
-            queueMessagePart(senderNick, chunk);
+            // Pass original timestamp for deterministic packet hashing
+            queueMessagePart(senderNick, chunk, originalTimestamp);
         }
 
         offset += chunkLen;

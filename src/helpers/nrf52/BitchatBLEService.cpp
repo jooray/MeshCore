@@ -80,7 +80,11 @@ BitchatBLEService::BitchatBLEService()
 }
 
 bool BitchatBLEService::beginStandalone(const char* deviceName, BitchatBLECallback* callback) {
+    Serial.println("NRF52_BLE: beginStandalone entry");
+    Serial.flush();
+
     if (callback == nullptr) {
+        Serial.println("NRF52_BLE: ERROR - callback is nullptr");
         return false;
     }
 
@@ -88,14 +92,24 @@ bool BitchatBLEService::beginStandalone(const char* deviceName, BitchatBLECallba
     strncpy(_deviceName, deviceName, sizeof(_deviceName) - 1);
     _deviceName[sizeof(_deviceName) - 1] = '\0';
 
+    Serial.println("NRF52_BLE: Configuring connection params");
+    Serial.flush();
+
     // Configure connection parameters BEFORE begin()
     // MTU 517 is standard max BLE MTU - allows writes up to 514 bytes
     // setMaxLen(512) is the characteristic buffer size
     // Parameters: mtu_max, event_len, hvn_qsize, wrcmd_qsize
     Bluefruit.configPrphConn(517, BLE_GAP_EVENT_LENGTH_DEFAULT, BLE_GATTS_HVN_TX_QUEUE_SIZE_DEFAULT, BLE_GATTC_WRITE_CMD_TX_QUEUE_SIZE_DEFAULT);
 
+    Serial.println("NRF52_BLE: Calling Bluefruit.begin()");
+    Serial.flush();
+
     // Initialize Bluefruit
     Bluefruit.begin();
+
+    Serial.println("NRF52_BLE: Bluefruit.begin() returned");
+    Serial.flush();
+
     Bluefruit.setTxPower(8);  // Max power (+8 dBm) for better range
 
     // Set up connection callbacks
@@ -105,6 +119,9 @@ bool BitchatBLEService::beginStandalone(const char* deviceName, BitchatBLECallba
     // Bitchat uses open security (no PIN required)
     Bluefruit.Security.setMITM(false);
     Bluefruit.Security.setIOCaps(false, false, false);
+
+    Serial.println("NRF52_BLE: Setting device name");
+    Serial.flush();
 
     // Set device name (filter out non-ASCII characters for BLE)
     char safeName[32];
@@ -119,8 +136,14 @@ bool BitchatBLEService::beginStandalone(const char* deviceName, BitchatBLECallba
 
     Bluefruit.setName(safeName);
 
+    Serial.println("NRF52_BLE: Starting service");
+    Serial.flush();
+
     // Configure the Bitchat service
     _service.begin();
+
+    Serial.println("NRF52_BLE: Configuring characteristic");
+    Serial.flush();
 
     // Configure the characteristic with READ, WRITE, WRITE_NR, NOTIFY properties
     _characteristic.setProperties(CHR_PROPS_READ | CHR_PROPS_WRITE | CHR_PROPS_WRITE_WO_RESP | CHR_PROPS_NOTIFY | CHR_PROPS_INDICATE);
@@ -130,6 +153,9 @@ bool BitchatBLEService::beginStandalone(const char* deviceName, BitchatBLECallba
     _characteristic.setWriteCallback(onCharacteristicWrite);
     _characteristic.setCccdWriteCallback(onCharacteristicCccdWrite);
     _characteristic.begin();
+
+    Serial.println("NRF52_BLE: Service fully initialized");
+    Serial.flush();
 
     _serviceActive = true;
     BITCHAT_DEBUG_PRINTLN("Bitchat BLE service initialized: %s", safeName);

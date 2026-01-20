@@ -116,7 +116,16 @@ void halt() {
 void setup() {
   Serial.begin(115200);
 
+  // Early debug - wait for USB serial on NRF52
+  #if defined(NRF52_PLATFORM)
+  delay(2000);  // Give USB serial time to enumerate
+  #endif
+  Serial.println("\n\n=== BOOT START ===");
+  Serial.flush();
+
   board.begin();
+  Serial.println("board.begin() done");
+  Serial.flush();
 
 #ifdef DISPLAY_CLASS
   DisplayDriver* disp = NULL;

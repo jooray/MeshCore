@@ -374,7 +374,7 @@ private:
     void processBitchatMessage(const BitchatMessage& msg);
 
     /**
-     * Relay Bitchat channel message to Meshcore mesh
+     * Relay Bitchat channel message to Meshcore mesh (with random delay for multi-bridge dedup)
      * @param msg Original Bitchat message
      * @param channelName Channel name (e.g., "#mesh")
      * @param senderNick Sender's nickname from Bitchat
@@ -382,6 +382,14 @@ private:
      */
     void relayChannelMessageToMesh(const BitchatMessage& msg, const char* channelName,
                                    const char* senderNick, const char* text);
+
+    /**
+     * Internal relay function - actually sends message to mesh after delay
+     * @param senderNick Sender's nickname from Bitchat
+     * @param text Message content
+     * @param originalTimestamp Original Bitchat timestamp in seconds
+     */
+    void relayChannelMessageToMesh_Internal(const char* senderNick, const char* text, uint32_t originalTimestamp);
 
     /**
      * Relay Bitchat DM to Meshcore mesh
@@ -433,8 +441,9 @@ private:
      * Send a single message part to the mesh (immediate, no delay)
      * @param senderNick Sender nickname with emoji prefix
      * @param text Message text (may include part indicator)
+     * @param originalTimestamp Original Bitchat timestamp in seconds (for deterministic packet hash)
      */
-    void sendSingleMessageToMesh(const char* senderNick, const char* text);
+    void sendSingleMessageToMesh(const char* senderNick, const char* text, uint32_t originalTimestamp);
 
     // Pending message parts queue for reliable multi-part message delivery
     // Instead of using mesh's delayed transmission (which can fail silently when pool is exhausted),
@@ -442,6 +451,7 @@ private:
     struct PendingPart {
         char senderNick[68];    // Includes emoji prefix
         char text[180];         // Part text with "[X/Y] " indicator
+        uint32_t originalTimestamp;  // Original Bitchat timestamp (seconds) for deterministic hashing
         bool valid;
     };
     static const size_t MAX_PENDING_PARTS = 8;  // Queue size (parts 2-8 queued, part 1 sent immediately)
@@ -452,13 +462,50 @@ private:
     size_t _pendingPartsTail;        // Next slot to queue into
     uint32_t _lastPartSentTime;      // millis() when last part was sent
 
+    // Multi-bridge duplicate relay prevention
+    // When multiple bridges are on the same Bitchat network, they all receive the same BLE message
+    // and try to relay it. This causes: (1) RF collision if both transmit simultaneously,
+    // (2) duplicate messages if both succeed with different timestamps.
+    //
+    // Solution: Random delay (0-3s) + use original Bitchat timestamp for deterministic packet hash
+    // - Random delay spreads out transmission attempts, avoiding RF collision
+    // - Original timestamp ensures all bridges produce identical packets → MeshCore dedup catches duplicates
+    struct PendingRelay {
+        char senderNick[68];        // Sender nickname from Bitchat
+        char content[BITCHAT_MAX_PAYLOAD_SIZE];  // Message content - must hold full decompressed message (up to 2048 bytes)
+        uint32_t bitchatTimestamp;  // Original Bitchat timestamp in seconds
+        uint32_t sendAtMillis;      // When to send (millis() + random delay)
+        bool valid;
+    };
+    // Reduced to 2 entries to save memory (~4KB vs ~8KB with 4 entries)
+    // 2 is sufficient since random delays spread out transmission attempts
+    static const size_t MAX_PENDING_RELAYS = 2;
+    static const uint32_t MAX_RELAY_DELAY_MS = 3000;  // 0-3 second random delay
+    PendingRelay _pendingRelays[MAX_PENDING_RELAYS];
+
     /**
      * Queue a message part for delayed sending
      * @param senderNick Sender nickname with emoji prefix
      * @param text Message text (may include part indicator)
+     * @param originalTimestamp Original Bitchat timestamp in seconds (for deterministic packet hash)
      * @return true if queued successfully
      */
-    bool queueMessagePart(const char* senderNick, const char* text);
+    bool queueMessagePart(const char* senderNick, const char* text, uint32_t originalTimestamp);
+
+    /**
+     * Queue a channel message relay with random delay (multi-bridge collision avoidance)
+     * @param senderNick Sender nickname from Bitchat
+     * @param content Message content
+     * @param bitchatTimestamp Original Bitchat timestamp in seconds
+     * @return true if queued successfully
+     */
+    bool queuePendingRelay(const char* senderNick, const char* content, uint32_t bitchatTimestamp);
+
+    /**
+     * Process pending relay queue - called from loop()
+     * Sends queued messages when their delay has elapsed
+     */
+    void processPendingRelays();
 
     /**
      * Process pending message parts queue (called from loop())
