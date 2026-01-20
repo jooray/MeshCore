@@ -157,6 +157,7 @@ bool BitchatProtocol::parseMessage(const uint8_t* data, size_t length, BitchatMe
     offset += 8;
     msg.flags = data[offset++];
     msg.payloadLength = readBE16(&data[offset]);
+    msg.wirePayloadLength = msg.payloadLength;  // Store original wire length before decompression
     offset += 2;
 
     Serial.printf("REDUNDANT_DEBUG: parseMessage HEADER: ver=%u type=0x%02X ttl=%u flags=0x%02X payloadLen=%u\n",
@@ -462,7 +463,9 @@ size_t BitchatProtocol::getMessageSize(const BitchatMessage& msg) {
         size += BITCHAT_RECIPIENT_ID_SIZE;
     }
 
-    size += msg.payloadLength;
+    // Use wirePayloadLength for wire size calculation (important for compressed messages)
+    // After decompression, payloadLength has decompressed size but wirePayloadLength has original wire size
+    size += (msg.wirePayloadLength > 0) ? msg.wirePayloadLength : msg.payloadLength;
 
     if (msg.hasSignature()) {
         size += BITCHAT_SIGNATURE_SIZE;

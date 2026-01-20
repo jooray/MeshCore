@@ -331,20 +331,25 @@ void BitchatBLEService::loop() {
                 memmove(_writeBuffer, _writeBuffer + consumed, _writeBufferOffset - consumed);
                 _writeBufferOffset -= consumed;
                 BITCHAT_DEBUG_PRINTLN("Shifted %zu bytes, %zu remaining", consumed, _writeBufferOffset);
+
+                // Check if remaining data is garbage (Android pads messages to 256 bytes)
+                // If first byte is not version 1, it's padding/garbage - clear it
+                if (_writeBufferOffset > 0 && _writeBuffer[0] != BITCHAT_VERSION) {
+                    BITCHAT_DEBUG_PRINTLN("Remaining data starts with 0x%02X (not version 1), clearing garbage",
+                                          _writeBuffer[0]);
+                    clearWriteBuffer();
+                }
             } else {
                 clearWriteBuffer();
             }
         } else if (_writeBufferOffset >= BITCHAT_HEADER_SIZE) {
-            // No messages parsed - check if buffer contains garbage
-            BitchatMessage msg;
-            if (BitchatProtocol::parseMessage(_writeBuffer, _writeBufferOffset, msg)) {
-                size_t expectedMin = BitchatProtocol::getMessageSize(msg);
-                if (_writeBufferOffset > expectedMin + 100) {
-                    BITCHAT_DEBUG_PRINTLN("Write buffer contains unparseable data, clearing");
-                    clearWriteBuffer();
-                }
+            // No messages parsed - check if buffer starts with invalid version (garbage)
+            if (_writeBuffer[0] != BITCHAT_VERSION) {
+                BITCHAT_DEBUG_PRINTLN("Buffer starts with 0x%02X (not version 1), clearing garbage",
+                                      _writeBuffer[0]);
+                clearWriteBuffer();
             }
-            // If parse fails but buffer size is reasonable, keep waiting for more data
+            // If version is valid but parse fails, keep waiting for more data
         }
     }
 

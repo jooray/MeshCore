@@ -62,12 +62,13 @@ struct BitchatMessage {
     uint64_t timestamp;  // milliseconds since epoch
     uint8_t flags;
     uint16_t payloadLength;
+    uint16_t wirePayloadLength;  // Original payload length on wire (before decompression)
     uint8_t senderId[BITCHAT_SENDER_ID_SIZE];
     uint8_t recipientId[BITCHAT_RECIPIENT_ID_SIZE];
     uint8_t payload[BITCHAT_MAX_PAYLOAD_SIZE];
     uint8_t signature[BITCHAT_SIGNATURE_SIZE];
 
-    BitchatMessage() : version(BITCHAT_VERSION), type(0), ttl(0), timestamp(0), flags(0), payloadLength(0) {
+    BitchatMessage() : version(BITCHAT_VERSION), type(0), ttl(0), timestamp(0), flags(0), payloadLength(0), wirePayloadLength(0) {
         memset(senderId, 0, sizeof(senderId));
         memset(recipientId, 0, sizeof(recipientId));
         memset(payload, 0, sizeof(payload));

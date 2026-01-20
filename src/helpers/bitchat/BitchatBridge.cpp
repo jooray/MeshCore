@@ -1362,20 +1362,58 @@ void BitchatBridge::relayChannelMessageToMesh(const BitchatMessage& msg, const c
         size_t remaining = contentLen - offset;
         size_t chunkLen = (remaining > MAX_CHUNK_SIZE) ? MAX_CHUNK_SIZE : remaining;
 
-        // Adjust chunk length to avoid splitting UTF-8 multibyte characters
-        // UTF-8 continuation bytes start with 10xxxxxx (0x80-0xBF)
-        while (chunkLen > 0 && chunkLen < remaining) {
-            uint8_t nextByte = (uint8_t)text[offset + chunkLen];
-            if ((nextByte & 0xC0) != 0x80) {
-                // This is not a continuation byte, safe to split here
-                break;
+        // Smart split: try word boundaries first, then punctuation, then fallback to UTF-8 safe
+        if (chunkLen < remaining) {
+            // We need to split - find the best split point
+            size_t bestSplit = 0;
+
+            // First pass: look for last space within chunk (word boundary)
+            for (size_t i = chunkLen; i > chunkLen / 2; i--) {
+                if (text[offset + i - 1] == ' ') {
+                    // Found a space - check it's not mid UTF-8
+                    uint8_t nextByte = (uint8_t)text[offset + i];
+                    if ((nextByte & 0xC0) != 0x80) {
+                        bestSplit = i;
+                        break;
+                    }
+                }
             }
-            // Back up to avoid splitting mid-character
-            chunkLen--;
+
+            // Second pass: if no space, look for punctuation
+            if (bestSplit == 0) {
+                for (size_t i = chunkLen; i > chunkLen / 2; i--) {
+                    char c = text[offset + i - 1];
+                    // Common punctuation that's safe to split after
+                    if (c == '.' || c == ',' || c == '!' || c == '?' ||
+                        c == ';' || c == ':' || c == '-' || c == ')' || c == ']') {
+                        // Check next byte isn't UTF-8 continuation
+                        uint8_t nextByte = (uint8_t)text[offset + i];
+                        if ((nextByte & 0xC0) != 0x80) {
+                            bestSplit = i;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Use best split point if found, otherwise fallback to UTF-8 safe split
+            if (bestSplit > 0) {
+                chunkLen = bestSplit;
+            } else {
+                // Fallback: just ensure we don't split mid UTF-8 character
+                while (chunkLen > 0) {
+                    uint8_t nextByte = (uint8_t)text[offset + chunkLen];
+                    if ((nextByte & 0xC0) != 0x80) {
+                        // Not a continuation byte, safe to split here
+                        break;
+                    }
+                    chunkLen--;
+                }
+            }
         }
 
         if (chunkLen == 0) {
-            BITCHAT_DEBUG_PRINTLN("Error: Could not find safe UTF-8 split point");
+            BITCHAT_DEBUG_PRINTLN("Error: Could not find safe split point");
             break;
         }
 
