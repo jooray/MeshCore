@@ -100,23 +100,27 @@ private:
 
     // Write buffer for reassembling fragmented BLE writes
     // 1024 bytes to handle long messages that compress to ~615 bytes (2 fragments)
-    uint8_t _writeBuffer[1024];
+    // Made static to keep 1KB out of heap allocation
+    static uint8_t _writeBuffer[1024];
     size_t _writeBufferOffset;
     uint32_t _lastWriteTime;
     static const uint32_t WRITE_TIMEOUT_MS = 5000;
 
     // Message queue for deferred processing (incoming)
-    static const size_t MESSAGE_QUEUE_SIZE = 8;
+    // Reduced from 8 to 2 to save ~13KB heap (each BitchatMessage is ~2KB)
+    static const size_t MESSAGE_QUEUE_SIZE = 2;
     struct QueuedMessage {
         BitchatMessage msg;
         bool valid;
     };
-    QueuedMessage _messageQueue[MESSAGE_QUEUE_SIZE];
+    // Static to keep out of heap allocation
+    static QueuedMessage _messageQueue[MESSAGE_QUEUE_SIZE];
     volatile size_t _queueHead;
     volatile size_t _queueTail;
 
     // Pending outgoing message (when client not yet subscribed)
-    BitchatMessage _pendingOutgoing;
+    // Made static to keep ~2KB out of heap allocation
+    static BitchatMessage _pendingOutgoing;
     bool _hasPendingOutgoing;
 
     void clearWriteBuffer();

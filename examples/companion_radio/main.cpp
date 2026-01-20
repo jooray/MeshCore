@@ -118,7 +118,15 @@ void setup() {
 
   // Early debug - wait for USB serial on NRF52
   #if defined(NRF52_PLATFORM)
-  delay(2000);  // Give USB serial time to enumerate
+  // Wait for USB serial to be ready (with timeout)
+  uint32_t serialWaitStart = millis();
+  while (!Serial && (millis() - serialWaitStart < 3000)) {
+    delay(10);
+  }
+  // Now serial port exists - give user time to connect their monitor
+  Serial.println("\n\n*** Waiting 5 seconds for serial monitor... ***");
+  Serial.flush();
+  delay(5000);
   #endif
   Serial.println("\n\n=== BOOT START ===");
   Serial.flush();
@@ -177,14 +185,28 @@ void setup() {
 
   // Standalone Bitchat BLE if enabled (USB serial for MeshCore, BLE for Bitchat)
   #ifdef ENABLE_BITCHAT
+  Serial.println("MAIN: Allocating BitchatBridge...");
+  Serial.flush();
   bitchat_bridge = new BitchatBridge(the_mesh, the_mesh.self_id, the_mesh.getNodeName());
-  bitchat_bridge->begin();
-  if (bitchat_bridge->beginStandalone(the_mesh.getNodeName())) {
-    Serial.println("Bitchat BLE service started (standalone mode)");
+  Serial.print("MAIN: bitchat_bridge ptr = ");
+  Serial.println((unsigned long)bitchat_bridge, HEX);
+  Serial.flush();
+  if (bitchat_bridge == nullptr) {
+    Serial.println("MAIN: ERROR - BitchatBridge allocation failed!");
   } else {
-    Serial.println("ERROR: Failed to start Bitchat BLE service!");
+    Serial.println("MAIN: Calling bitchat_bridge->begin()");
+    Serial.flush();
+    bitchat_bridge->begin();
+    Serial.print("MAIN: After begin(), bitchat_bridge ptr = ");
+    Serial.println((unsigned long)bitchat_bridge, HEX);
+    Serial.flush();
+    if (bitchat_bridge->beginStandalone(the_mesh.getNodeName())) {
+      Serial.println("Bitchat BLE service started (standalone mode)");
+    } else {
+      Serial.println("ERROR: Failed to start Bitchat BLE service!");
+    }
+    the_mesh.initBitchat(bitchat_bridge);
   }
-  the_mesh.initBitchat(bitchat_bridge);
   #endif
 #endif
   the_mesh.startInterface(serial_interface);

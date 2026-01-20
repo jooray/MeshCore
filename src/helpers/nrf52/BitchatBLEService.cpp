@@ -54,6 +54,15 @@ static const uint8_t BITCHAT_CHARACTERISTIC_UUID_BYTES[] = {
 // Singleton instance for static callback access
 BitchatBLEService* BitchatBLEService::_instance = nullptr;
 
+// Static message queue to keep ~4KB out of heap (2 * ~2KB BitchatMessage)
+BitchatBLEService::QueuedMessage BitchatBLEService::_messageQueue[MESSAGE_QUEUE_SIZE];
+
+// Static pending outgoing message to keep ~2KB out of heap
+BitchatMessage BitchatBLEService::_pendingOutgoing;
+
+// Static write buffer to keep 1KB out of heap
+uint8_t BitchatBLEService::_writeBuffer[1024];
+
 BitchatBLEService::BitchatBLEService()
     : _service(BITCHAT_SERVICE_UUID_BYTES)
     , _characteristic(BITCHAT_CHARACTERISTIC_UUID_BYTES)
@@ -238,11 +247,22 @@ void BitchatBLEService::loop() {
     uint32_t now = millis();
 
     // Handle deferred connect callback
+    static bool justConnected = false;
     if (_pendingConnect) {
         _pendingConnect = false;
+        justConnected = true;
         if (_callback != nullptr) {
+            Serial.println("DEBUG_CRASH: Before callback->onBitchatClientConnect");
+            Serial.flush();
             _callback->onBitchatClientConnect();
+            Serial.println("DEBUG_CRASH: After callback->onBitchatClientConnect");
+            Serial.flush();
         }
+    }
+
+    if (justConnected) {
+        Serial.println("DEBUG_CRASH: BLE loop after connect - checkpoint 1");
+        Serial.flush();
     }
 
     // Handle deferred data processing
@@ -303,6 +323,11 @@ void BitchatBLEService::loop() {
         }
     }
 
+    if (justConnected) {
+        Serial.println("DEBUG_CRASH: BLE loop after connect - checkpoint 2");
+        Serial.flush();
+    }
+
     // Check for write buffer timeout
     if (_writeBufferOffset > 0) {
         if (now - _lastWriteTime > WRITE_TIMEOUT_MS) {
@@ -311,14 +336,30 @@ void BitchatBLEService::loop() {
         }
     }
 
+    if (justConnected) {
+        Serial.println("DEBUG_CRASH: BLE loop after connect - checkpoint 3 (before processQueue)");
+        Serial.flush();
+    }
+
     // Process queued messages
     processQueue();
+
+    if (justConnected) {
+        Serial.println("DEBUG_CRASH: BLE loop after connect - checkpoint 4 (after processQueue)");
+        Serial.flush();
+    }
 
     // Debug: mark end of loop iteration if we processed something
     static uint32_t lastLoopPrint = 0;
     if (now - lastLoopPrint > 5000) {
         Serial.println("BLE_SERVICE: loop() heartbeat");
         lastLoopPrint = now;
+    }
+
+    if (justConnected) {
+        Serial.println("DEBUG_CRASH: BLE loop after connect - checkpoint 5 (loop end)");
+        Serial.flush();
+        justConnected = false;  // Only trace first iteration after connect
     }
 }
 
@@ -397,7 +438,9 @@ void BitchatBLEService::onConnect(uint16_t conn_handle) {
         BLEConnection* conn = Bluefruit.Connection(conn_handle);
         if (conn) {
             BITCHAT_DEBUG_PRINTLN("=== Connection established ===");
-            BITCHAT_DEBUG_PRINTLN("Connection interval: %.1f ms", conn->getConnectionInterval() * 1.25);
+            // NRF52 printf doesn't support %f, use integer math instead
+            uint32_t intervalMs = (conn->getConnectionInterval() * 125) / 100;  // *1.25 as integer
+            BITCHAT_DEBUG_PRINTLN("Connection interval: %u ms", (unsigned)intervalMs);
             BITCHAT_DEBUG_PRINTLN("Slave latency: %d", conn->getSlaveLatency());
             BITCHAT_DEBUG_PRINTLN("Supervision timeout: %d ms", conn->getSupervisionTimeout() * 10);
             BITCHAT_DEBUG_PRINTLN("MTU: %d", conn->getMtu());

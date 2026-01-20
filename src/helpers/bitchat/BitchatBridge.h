@@ -249,7 +249,8 @@ private:
     };
     static const size_t MESSAGE_HISTORY_SIZE = 16;
     static const uint32_t MESSAGE_EXPIRY_MS = 300000;  // 5 minutes
-    CachedMessage _messageHistory[MESSAGE_HISTORY_SIZE];
+    // Static to keep ~34KB out of heap allocation (16 * ~2KB BitchatMessage)
+    static CachedMessage _messageHistory[MESSAGE_HISTORY_SIZE];
     size_t _messageHistoryHead;
 
     /**
@@ -335,9 +336,10 @@ private:
         uint32_t startTime;         // millis() when first fragment received
         bool active;
     };
-    static const size_t MAX_FRAGMENT_BUFFERS = 16;
+    static const size_t MAX_FRAGMENT_BUFFERS = 4;  // Reduced from 16 to save memory
     static const uint32_t FRAGMENT_TIMEOUT_MS = 10000;  // 10 second timeout
-    FragmentBuffer _fragmentBuffers[MAX_FRAGMENT_BUFFERS];
+    // Static to keep ~8KB out of heap (4 * ~2KB each)
+    static FragmentBuffer _fragmentBuffers[MAX_FRAGMENT_BUFFERS];
 
     /**
      * Handle incoming fragment message
@@ -457,7 +459,8 @@ private:
     static const size_t MAX_PENDING_PARTS = 8;  // Queue size (parts 2-8 queued, part 1 sent immediately)
     static const size_t MAX_MESSAGE_PARTS = 8;  // Max parts per message (~1KB) - more is unreliable over LoRa
     static const uint32_t PART_SEND_DELAY_MS = 15000;  // Delay between parts (15s for LoRa reliability)
-    PendingPart _pendingParts[MAX_PENDING_PARTS];
+    // Static to keep ~2KB out of heap
+    static PendingPart _pendingParts[MAX_PENDING_PARTS];
     size_t _pendingPartsHead;        // Next part to send
     size_t _pendingPartsTail;        // Next slot to queue into
     uint32_t _lastPartSentTime;      // millis() when last part was sent
@@ -472,16 +475,20 @@ private:
     // - Original timestamp ensures all bridges produce identical packets → MeshCore dedup catches duplicates
     struct PendingRelay {
         char senderNick[68];        // Sender nickname from Bitchat
-        char content[BITCHAT_MAX_PAYLOAD_SIZE];  // Message content - must hold full decompressed message (up to 2048 bytes)
+        uint16_t contentOffset;     // Offset into shared _pendingRelayContent buffer
+        uint16_t contentLength;     // Length of content in shared buffer
         uint32_t bitchatTimestamp;  // Original Bitchat timestamp in seconds
         uint32_t sendAtMillis;      // When to send (millis() + random delay)
         bool valid;
     };
-    // Reduced to 2 entries to save memory (~4KB vs ~8KB with 4 entries)
-    // 2 is sufficient since random delays spread out transmission attempts
-    static const size_t MAX_PENDING_RELAYS = 2;
+    // Single entry to minimize memory - multi-bridge collision avoidance only needs one pending relay
+    // If a second message arrives before the first is sent, the first is dropped (acceptable trade-off)
+    static const size_t MAX_PENDING_RELAYS = 1;
     static const uint32_t MAX_RELAY_DELAY_MS = 3000;  // 0-3 second random delay
     PendingRelay _pendingRelays[MAX_PENDING_RELAYS];
+    // Shared content buffer for pending relays - static to keep it out of heap allocation
+    // Only one relay is active at a time, so sharing is safe
+    static char _pendingRelayContent[BITCHAT_MAX_PAYLOAD_SIZE];
 
     /**
      * Queue a message part for delayed sending

@@ -31,6 +31,12 @@ static void dumpPacketHex(const char* label, const uint8_t* data, size_t len) {
   #define BITCHAT_PACKETDUMP(label, data, len) {}
 #endif
 
+// Static member definitions to keep large buffers out of heap allocation
+char BitchatBridge::_pendingRelayContent[BITCHAT_MAX_PAYLOAD_SIZE];
+BitchatBridge::CachedMessage BitchatBridge::_messageHistory[MESSAGE_HISTORY_SIZE];
+BitchatBridge::FragmentBuffer BitchatBridge::_fragmentBuffers[MAX_FRAGMENT_BUFFERS];
+BitchatBridge::PendingPart BitchatBridge::_pendingParts[MAX_PENDING_PARTS];
+
 // PKCS#7 padding for Bitchat protocol signing (must match Android/iOS)
 // Block sizes: 256, 512, 1024, 2048 bytes
 static size_t applyPKCS7Padding(uint8_t* buffer, size_t dataLen, size_t bufferCapacity) {
@@ -526,8 +532,22 @@ bool BitchatBridge::hasBitchatClient() const {
 }
 #elif defined(NRF52_PLATFORM)
 bool BitchatBridge::beginStandalone(const char* deviceName) {
+    Serial.println("BITCHAT_BRIDGE: beginStandalone (NRF52) entry");
+    Serial.print("BITCHAT_BRIDGE: deviceName=");
+    Serial.println(deviceName);
+    Serial.print("BITCHAT_BRIDGE: this=");
+    Serial.println((unsigned long)this, HEX);
+    Serial.flush();
+
     // Initialize Bluefruit BLE with Bitchat service
-    if (!_bleService.beginStandalone(deviceName, this)) {
+    Serial.println("BITCHAT_BRIDGE: Calling _bleService.beginStandalone()");
+    Serial.flush();
+    bool result = _bleService.beginStandalone(deviceName, this);
+    Serial.print("BITCHAT_BRIDGE: _bleService.beginStandalone() returned: ");
+    Serial.println(result);
+    Serial.flush();
+
+    if (!result) {
         BITCHAT_DEBUG_PRINTLN("Failed to start BLE service");
         return false;
     }
@@ -844,6 +864,8 @@ void BitchatBridge::sendPeerAnnouncement() {
     } else {
         BITCHAT_DEBUG_PRINTLN("FAILED to send peer announcement");
     }
+    Serial.println("DEBUG_CRASH: sendPeerAnnouncement about to return");
+    Serial.flush();
 #endif
 }
 
@@ -885,10 +907,19 @@ void BitchatBridge::onBitchatMessageReceived(const BitchatMessage& msg) {
 void BitchatBridge::onBitchatClientConnect() {
     BITCHAT_DEBUG_PRINTLN("Client connected");
 
+    // Small delay to let BLE SoftDevice stabilize after connection
+    delay(50);
+    Serial.println("DEBUG_CRASH: After 50ms delay");
+    Serial.flush();
+
     // Send announcement immediately when client connects
     // This is now called from loop() so it's safe to do heavy work
     sendPeerAnnouncement();
+    Serial.println("DEBUG_CRASH: After sendPeerAnnouncement");
+    Serial.flush();
     _lastAnnounceTime = millis();
+    Serial.println("DEBUG_CRASH: After _lastAnnounceTime assignment");
+    Serial.flush();
 }
 
 void BitchatBridge::onBitchatClientDisconnect() {
@@ -1347,45 +1378,35 @@ void BitchatBridge::processPendingParts() {
 bool BitchatBridge::queuePendingRelay(const char* senderNick, const char* content, uint32_t bitchatTimestamp) {
     // Multi-bridge collision avoidance: queue message with random delay before relaying
     // This spreads out transmission attempts across bridges, avoiding RF collision
+    // With MAX_PENDING_RELAYS=1, if a relay is pending, we drop the new one (rare case)
 
-    // Find an empty slot
-    int emptySlot = -1;
-    for (size_t i = 0; i < MAX_PENDING_RELAYS; i++) {
-        if (!_pendingRelays[i].valid) {
-            emptySlot = i;
-            break;
-        }
+    // Check if slot is available (with single slot, just check index 0)
+    if (_pendingRelays[0].valid) {
+        BITCHAT_DEBUG_PRINTLN("Pending relay slot busy, dropping new message");
+        return false;
     }
 
-    if (emptySlot < 0) {
-        // Queue full - drop oldest entry and use that slot
-        uint32_t oldest = UINT32_MAX;
-        int oldestIdx = 0;
-        for (size_t i = 0; i < MAX_PENDING_RELAYS; i++) {
-            if (_pendingRelays[i].sendAtMillis < oldest) {
-                oldest = _pendingRelays[i].sendAtMillis;
-                oldestIdx = i;
-            }
-        }
-        BITCHAT_DEBUG_PRINTLN("Pending relay queue full, dropping oldest entry");
-        emptySlot = oldestIdx;
+    // Store sender nick
+    strncpy(_pendingRelays[0].senderNick, senderNick,
+            sizeof(_pendingRelays[0].senderNick) - 1);
+    _pendingRelays[0].senderNick[sizeof(_pendingRelays[0].senderNick) - 1] = '\0';
+
+    // Store content in shared buffer
+    size_t contentLen = strlen(content);
+    if (contentLen >= BITCHAT_MAX_PAYLOAD_SIZE) {
+        contentLen = BITCHAT_MAX_PAYLOAD_SIZE - 1;
     }
+    memcpy(_pendingRelayContent, content, contentLen);
+    _pendingRelayContent[contentLen] = '\0';
+    _pendingRelays[0].contentOffset = 0;
+    _pendingRelays[0].contentLength = contentLen;
 
-    // Store the pending relay
-    strncpy(_pendingRelays[emptySlot].senderNick, senderNick,
-            sizeof(_pendingRelays[emptySlot].senderNick) - 1);
-    _pendingRelays[emptySlot].senderNick[sizeof(_pendingRelays[emptySlot].senderNick) - 1] = '\0';
-
-    strncpy(_pendingRelays[emptySlot].content, content,
-            sizeof(_pendingRelays[emptySlot].content) - 1);
-    _pendingRelays[emptySlot].content[sizeof(_pendingRelays[emptySlot].content) - 1] = '\0';
-
-    _pendingRelays[emptySlot].bitchatTimestamp = bitchatTimestamp;
+    _pendingRelays[0].bitchatTimestamp = bitchatTimestamp;
 
     // Random delay between 0 and MAX_RELAY_DELAY_MS milliseconds
     uint32_t randomDelay = random(0, MAX_RELAY_DELAY_MS);
-    _pendingRelays[emptySlot].sendAtMillis = millis() + randomDelay;
-    _pendingRelays[emptySlot].valid = true;
+    _pendingRelays[0].sendAtMillis = millis() + randomDelay;
+    _pendingRelays[0].valid = true;
 
     BITCHAT_DEBUG_PRINTLN("Queued relay with %ums delay (multi-bridge dedup)", randomDelay);
     return true;
@@ -1402,10 +1423,13 @@ void BitchatBridge::processPendingRelays() {
             // Time to send this relay
             BITCHAT_DEBUG_PRINTLN("Processing pending relay (ts=%u)", _pendingRelays[i].bitchatTimestamp);
 
+            // Get content from shared buffer (content is at offset 0 with single-slot design)
+            const char* content = &_pendingRelayContent[_pendingRelays[i].contentOffset];
+
             // Call the internal relay function that handles message splitting
             relayChannelMessageToMesh_Internal(
                 _pendingRelays[i].senderNick,
-                _pendingRelays[i].content,
+                content,
                 _pendingRelays[i].bitchatTimestamp
             );
 
