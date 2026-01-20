@@ -8,7 +8,7 @@
 #define BITCHAT_HEADER_SIZE 14  // version(1) + type(1) + ttl(1) + timestamp(8) + flags(1) + payloadLength(2)
 #define BITCHAT_SIGNATURE_SIZE 64  // Ed25519 signature
 #define BITCHAT_MAX_WIRE_PAYLOAD_SIZE 245  // Max payload size on wire (compressed/padded)
-#define BITCHAT_MAX_PAYLOAD_SIZE 512   // Max decompressed payload size (reduced from 1024 to prevent stack overflow)
+#define BITCHAT_MAX_PAYLOAD_SIZE 2048  // Max decompressed payload size (heap-allocated decompression allows larger sizes)
 #define BITCHAT_VERSION 1
 #define BITCHAT_SENDER_ID_SIZE 8
 #define BITCHAT_RECIPIENT_ID_SIZE 8
@@ -222,6 +222,14 @@ public:
     static void createTextMessage(BitchatMessage& msg, uint64_t senderId, uint64_t recipientId,
                                   const char* channelName, const char* text, size_t textLen,
                                   uint64_t timestamp, uint8_t ttl);
+
+    /**
+     * Decompress a message payload in-place
+     * Use this after fragment reassembly when the IS_COMPRESSED flag is set.
+     * @param msg Message with compressed payload - will be modified in-place
+     * @return true if decompression succeeded (or wasn't needed), false on error
+     */
+    static bool decompressPayload(BitchatMessage& msg);
 
 private:
     // Read big-endian uint16

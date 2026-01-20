@@ -226,6 +226,7 @@ private:
     // Android sends Unix timestamps; we sync from them since ESP32 may not have valid RTC
     int64_t _timeOffset;      // Offset to add to millis() to get Unix time (ms)
     bool _timeSynced;         // True after receiving at least one valid timestamp from Android
+    uint64_t _bootTimestamp;  // Unix timestamp (ms) when time was first synced (used to filter old messages)
 
     // Statistics
     uint32_t _messagesRelayed;
@@ -317,17 +318,24 @@ private:
 
     // Fragment reassembly buffers for long messages
     // Bitchat fragments messages >245 bytes into multiple FRAGMENT messages
+    // Android fragment header format (13 bytes):
+    //   - 8 bytes: Fragment ID (random)
+    //   - 2 bytes: Index (big-endian UInt16)
+    //   - 2 bytes: Total count (big-endian UInt16)
+    //   - 1 byte:  Original message type
     struct FragmentBuffer {
         uint64_t senderId;
-        uint8_t fragmentId;
-        uint8_t totalFragments;
-        uint8_t receivedMask;  // Bitmask of received fragments (up to 8 fragments)
-        uint8_t data[2048];    // Reassembly buffer
+        uint8_t fragmentId[8];      // 8-byte fragment ID (matches Android)
+        uint16_t totalFragments;    // Changed from uint8_t
+        uint16_t receivedCount;     // Track received count
+        uint8_t originalType;       // Store original message type
+        uint8_t receivedMask;       // Bitmask of received fragments (up to 16 fragments with extension)
+        uint8_t data[2048];         // Reassembly buffer
         size_t dataLen;
-        uint32_t startTime;    // millis() when first fragment received
+        uint32_t startTime;         // millis() when first fragment received
         bool active;
     };
-    static const size_t MAX_FRAGMENT_BUFFERS = 4;
+    static const size_t MAX_FRAGMENT_BUFFERS = 16;
     static const uint32_t FRAGMENT_TIMEOUT_MS = 10000;  // 10 second timeout
     FragmentBuffer _fragmentBuffers[MAX_FRAGMENT_BUFFERS];
 
@@ -438,7 +446,7 @@ private:
     };
     static const size_t MAX_PENDING_PARTS = 8;  // Queue size (parts 2-8 queued, part 1 sent immediately)
     static const size_t MAX_MESSAGE_PARTS = 8;  // Max parts per message (~1KB) - more is unreliable over LoRa
-    static const uint32_t PART_SEND_DELAY_MS = 5000;  // Delay between parts
+    static const uint32_t PART_SEND_DELAY_MS = 8000;  // Delay between parts (8s for LoRa reliability)
     PendingPart _pendingParts[MAX_PENDING_PARTS];
     size_t _pendingPartsHead;        // Next part to send
     size_t _pendingPartsTail;        // Next slot to queue into

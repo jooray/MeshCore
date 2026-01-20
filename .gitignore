@@ -15,3 +15,5 @@ cmake-*
 .ccls
 compile_commands.json
 releases/
+CLAUDE.md
+AGENTS.md

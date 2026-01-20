@@ -73,6 +73,7 @@ BitchatBridge::BitchatBridge(mesh::Mesh& mesh, mesh::LocalIdentity& identity, co
     , _pendingAnnounce(false)
     , _timeOffset(0)
     , _timeSynced(false)
+    , _bootTimestamp(0)
     , _messagesRelayed(0)
     , _duplicatesDropped(0)
     , _meshChannelConfigured(false)
@@ -103,8 +104,10 @@ BitchatBridge::BitchatBridge(mesh::Mesh& mesh, mesh::LocalIdentity& identity, co
     for (size_t i = 0; i < MAX_FRAGMENT_BUFFERS; i++) {
         _fragmentBuffers[i].active = false;
         _fragmentBuffers[i].senderId = 0;
-        _fragmentBuffers[i].fragmentId = 0;
+        memset(_fragmentBuffers[i].fragmentId, 0, sizeof(_fragmentBuffers[i].fragmentId));
         _fragmentBuffers[i].totalFragments = 0;
+        _fragmentBuffers[i].receivedCount = 0;
+        _fragmentBuffers[i].originalType = 0;
         _fragmentBuffers[i].receivedMask = 0;
         _fragmentBuffers[i].dataLen = 0;
         _fragmentBuffers[i].startTime = 0;
@@ -641,7 +644,14 @@ void BitchatBridge::syncTimeFromPacket(uint64_t packetTimestamp) {
         // If this is first sync, or if the offset changed significantly (device was rebooted), update it
         if (!_timeSynced || abs(newOffset - _timeOffset) > 60000) {  // > 1 minute drift
             _timeOffset = newOffset;
+            bool wasFirstSync = !_timeSynced;
             _timeSynced = true;
+
+            // Record boot timestamp on first sync (used to filter old synced messages)
+            if (wasFirstSync) {
+                _bootTimestamp = packetTimestamp;
+                BITCHAT_DEBUG_PRINTLN("Boot timestamp recorded: %lu sec", (unsigned long)(packetTimestamp / 1000ULL));
+            }
             BITCHAT_DEBUG_PRINTLN("Time synced from Bitchat: offset=%ld ms", (long)(_timeOffset / 1000));
         }
 
@@ -876,6 +886,24 @@ void BitchatBridge::onBitchatClientDisconnect() {
 #endif
 
 void BitchatBridge::processBitchatMessage(const BitchatMessage& msg) {
+    uint64_t msgSender = msg.getSenderId64();
+    Serial.printf("PROCESS_MSG: type=0x%02X payloadLen=%u sender=%08lX ts=%lu\n",
+                  msg.type, msg.payloadLength,
+                  (unsigned long)(msgSender & 0xFFFFFFFF),
+                  (unsigned long)(msg.timestamp / 1000ULL));
+    Serial.flush();
+
+    // Full payload hex dump for MESSAGE types
+    if (msg.type == BITCHAT_MSG_MESSAGE) {
+        Serial.println("REDUNDANT_DEBUG: ====== MESSAGE PAYLOAD HEX ======");
+        for (uint16_t i = 0; i < msg.payloadLength && i < 256; i++) {
+            Serial.printf("%02X", msg.payload[i]);
+        }
+        Serial.println();
+        Serial.println("REDUNDANT_DEBUG: ====== END MESSAGE PAYLOAD ======");
+        Serial.flush();
+    }
+
     BITCHAT_PACKETDUMP("BLE_RX", msg.payload, msg.payloadLength);
 
     // Sync time from incoming Bitchat packets (Android sends valid Unix timestamps)
@@ -905,12 +933,22 @@ void BitchatBridge::processBitchatMessage(const BitchatMessage& msg) {
         return;
     }
 
+    // Drop messages older than boot time (prevents reprocessing old synced messages after reboot)
+    // Only apply to MESSAGE types - ANNOUNCE and SYNC can be older
+    if (_timeSynced && _bootTimestamp > 0 && msg.timestamp > 0 &&
+        msg.type == BITCHAT_MSG_MESSAGE && msg.timestamp < _bootTimestamp) {
+        BITCHAT_DEBUG_PRINTLN("Dropping message older than boot time (%lu < %lu)",
+                              (unsigned long)(msg.timestamp / 1000ULL),
+                              (unsigned long)(_bootTimestamp / 1000ULL));
+        return;
+    }
+
     // Handle based on message type
     switch (msg.type) {
         case BITCHAT_MSG_MESSAGE: {
-            char senderNick[64];
-            char content[512];  // Increased to handle decompressed messages (up to ~500 bytes)
-            char channelName[32];
+            static char senderNick[64];  // Static to avoid stack overflow
+            static char content[2048];   // Static - must match BITCHAT_MAX_PAYLOAD_SIZE
+            static char channelName[32]; // Static to avoid stack overflow
             bool parsedAsTlv = false;
 
             // First try TLV parsing (some messages might use it)
@@ -1381,20 +1419,63 @@ void BitchatBridge::relayDirectMessageToMesh(const BitchatMessage& msg, const ch
 // ============================================================================
 
 void BitchatBridge::handleFragment(const BitchatMessage& msg) {
-    // Fragment header format (from Bitchat protocol):
-    // [fragmentId:1][totalFragments:1][fragmentIndex:1][data...]
-    if (msg.payloadLength < 3) {
+    Serial.println("FRAGMENT: >>> ENTRY <<<");
+    Serial.flush();
+
+    Serial.printf("FRAGMENT: payloadLen=%u, type=0x%02X\n",
+                  msg.payloadLength, msg.type);
+    Serial.flush();
+
+    // Full payload hex dump for debugging
+    BITCHAT_PACKETDUMP("FRAGMENT_PAYLOAD", msg.payload, msg.payloadLength);
+    Serial.flush();
+
+    // Android fragment header format (13 bytes):
+    //   - 8 bytes: Fragment ID (random identifier for this fragment sequence)
+    //   - 2 bytes: Index (big-endian UInt16)
+    //   - 2 bytes: Total count (big-endian UInt16)
+    //   - 1 byte:  Original message type
+    //   - Variable: Fragment data
+    if (msg.payloadLength < 13) {
+        Serial.printf("FRAGMENT: Payload too short for header (%u < 13)\n", msg.payloadLength);
+        Serial.flush();
         return;
     }
 
-    uint8_t fragmentId = msg.payload[0];
-    uint8_t totalFragments = msg.payload[1];
-    uint8_t fragmentIndex = msg.payload[2];
+    // Parse 8-byte fragment ID
+    uint8_t fragmentIdBytes[8];
+    memcpy(fragmentIdBytes, &msg.payload[0], 8);
+
+    // Parse 2-byte index (big-endian)
+    uint16_t fragmentIndex = (static_cast<uint16_t>(msg.payload[8]) << 8) | msg.payload[9];
+
+    // Parse 2-byte total count (big-endian)
+    uint16_t totalFragments = (static_cast<uint16_t>(msg.payload[10]) << 8) | msg.payload[11];
+
+    // Parse 1-byte original message type
+    uint8_t originalType = msg.payload[12];
 
     uint64_t senderId = msg.getSenderId64();
 
+    // Skip fragments from ourselves (rebroadcasted back to us)
+    if (senderId == _bitchatPeerId) {
+        BITCHAT_DEBUG_PRINTLN("FRAGMENT: Ignoring our own fragment (rebroadcast)");
+        return;
+    }
+
+    Serial.printf("FRAGMENT: parsed idx=%u/%u, originalType=0x%02X, dataLen=%u\n",
+                  fragmentIndex, totalFragments, originalType, (unsigned)(msg.payloadLength - 13));
+    // Log fragmentId in hex for correlation
+    Serial.printf("FRAGMENT: fragmentId=%02X%02X%02X%02X%02X%02X%02X%02X, sender=%08lX\n",
+                  fragmentIdBytes[0], fragmentIdBytes[1], fragmentIdBytes[2], fragmentIdBytes[3],
+                  fragmentIdBytes[4], fragmentIdBytes[5], fragmentIdBytes[6], fragmentIdBytes[7],
+                  (unsigned long)(senderId & 0xFFFFFFFF));
+    Serial.flush();
+
     // Validate fragment parameters
-    if (totalFragments == 0 || totalFragments > 8 || fragmentIndex >= totalFragments) {
+    if (totalFragments == 0 || totalFragments > 16 || fragmentIndex >= totalFragments) {
+        Serial.printf("FRAGMENT: Invalid params (total=%u, idx=%u)\n", totalFragments, fragmentIndex);
+        Serial.flush();
         return;
     }
 
@@ -1413,7 +1494,7 @@ void BitchatBridge::handleFragment(const BitchatMessage& msg) {
     for (size_t i = 0; i < MAX_FRAGMENT_BUFFERS; i++) {
         if (_fragmentBuffers[i].active &&
             _fragmentBuffers[i].senderId == senderId &&
-            _fragmentBuffers[i].fragmentId == fragmentId) {
+            memcmp(_fragmentBuffers[i].fragmentId, fragmentIdBytes, 8) == 0) {
             buf = &_fragmentBuffers[i];
             break;
         }
@@ -1421,6 +1502,8 @@ void BitchatBridge::handleFragment(const BitchatMessage& msg) {
 
     // New fragment sequence - find empty buffer
     if (buf == nullptr) {
+        Serial.printf("FRAGMENT: No existing buffer found for idx=%u, creating new\n", fragmentIndex);
+        Serial.flush();
         if (msg.type != BITCHAT_MSG_FRAGMENT_NEW && fragmentIndex != 0) {
             // Missed the first fragment - can't reassemble
             BITCHAT_DEBUG_PRINTLN("Fragment sequence interrupted - missed first fragment (idx=%u)", fragmentIndex);
@@ -1432,78 +1515,147 @@ void BitchatBridge::handleFragment(const BitchatMessage& msg) {
                 buf = &_fragmentBuffers[i];
                 buf->active = true;
                 buf->senderId = senderId;
-                buf->fragmentId = fragmentId;
+                memcpy(buf->fragmentId, fragmentIdBytes, 8);
                 buf->totalFragments = totalFragments;
+                buf->receivedCount = 0;
+                buf->originalType = originalType;
                 buf->receivedMask = 0;
                 buf->dataLen = 0;
                 buf->startTime = now;
                 memset(buf->data, 0, sizeof(buf->data));
+                Serial.printf("FRAGMENT: Created new buffer at index %zu\n", i);
+                Serial.flush();
                 break;
             }
         }
+    } else {
+        Serial.printf("FRAGMENT: Found existing buffer for idx=%u, receivedCount=%u, dataLen=%u\n",
+                      fragmentIndex, buf->receivedCount, (unsigned)buf->dataLen);
+        Serial.flush();
     }
 
     if (buf == nullptr) {
-        BITCHAT_DEBUG_PRINTLN("Fragment buffer full - cannot reassemble (sender=%08lX)", (unsigned long)(senderId & 0xFFFFFFFF));
+        Serial.println("FRAGMENT: Buffer pool full - clearing all buffers");
+        Serial.flush();
+        // Clear all buffers if pool is full (likely corrupted state)
+        for (size_t i = 0; i < MAX_FRAGMENT_BUFFERS; i++) {
+            _fragmentBuffers[i].active = false;
+        }
         return;
     }
 
-    // Copy fragment data
-    size_t dataOffset = 3;  // Skip header
+    Serial.printf("FRAGMENT: buf=%p, active=%d, dataLen=%u\n",
+                  (void*)buf, buf->active ? 1 : 0, (unsigned)buf->dataLen);
+    Serial.flush();
+
+    // Copy fragment data (starts after 13-byte header)
+    size_t dataOffset = 13;
     size_t dataLen = msg.payloadLength - dataOffset;
 
-    // Each fragment contains ~240 bytes of data (245 - 3 header - 2 checksum)
-    size_t fragmentDataSize = 240;
-    size_t insertOffset = fragmentIndex * fragmentDataSize;
-
-    if (insertOffset + dataLen > sizeof(buf->data)) {
+    // Validate dataLen - allow up to 500 bytes per fragment (compressed chunks can be large)
+    if (dataLen == 0 || dataLen > 500) {
+        Serial.printf("FRAGMENT: Invalid dataLen=%u, clearing buffer\n", (unsigned)dataLen);
+        Serial.flush();
+        buf->active = false;
         return;
     }
 
-    memcpy(&buf->data[insertOffset], &msg.payload[dataOffset], dataLen);
-    buf->receivedMask |= (1 << fragmentIndex);
+    // Each fragment can contain up to ~500 bytes of data
+    // Use a conservative fragment size estimate for positioning
+    size_t fragmentDataSize = 500;
+    size_t insertOffset = fragmentIndex * fragmentDataSize;
 
-    // Track total data length
-    size_t endPos = insertOffset + dataLen;
-    if (endPos > buf->dataLen) {
-        buf->dataLen = endPos;
+    // For now, use sequential assembly - append data for each fragment
+    // This works for ordered delivery; for out-of-order we'd need offset tracking
+    if (fragmentIndex == 0) {
+        // First fragment - copy directly
+        Serial.printf("FRAGMENT: About to copy %u bytes to buf->data[0] (first fragment)\n",
+                      (unsigned)dataLen);
+        Serial.flush();
+        memcpy(buf->data, &msg.payload[dataOffset], dataLen);
+        Serial.println("FRAGMENT: memcpy done (first fragment)");
+        Serial.flush();
+        buf->dataLen = dataLen;
+    } else {
+        // Subsequent fragments - append to existing data
+        if (buf->dataLen + dataLen > sizeof(buf->data)) {
+            Serial.printf("FRAGMENT: Overflow - existing=%u + new=%u > %u\n",
+                          (unsigned)buf->dataLen, (unsigned)dataLen, (unsigned)sizeof(buf->data));
+            Serial.flush();
+            buf->active = false;
+            return;
+        }
+        Serial.printf("FRAGMENT: About to copy %u bytes to buf->data[%u]\n",
+                      (unsigned)dataLen, (unsigned)buf->dataLen);
+        Serial.flush();
+        memcpy(&buf->data[buf->dataLen], &msg.payload[dataOffset], dataLen);
+        Serial.println("FRAGMENT: memcpy done");
+        Serial.flush();
+        buf->dataLen += dataLen;
     }
 
-    BITCHAT_DEBUG_PRINTLN("Fragment %d/%d stored", fragmentIndex + 1, totalFragments);
+    buf->receivedMask |= (1 << fragmentIndex);
+    buf->receivedCount++;
+
+    Serial.printf("FRAGMENT: receivedCount=%u, total=%u, dataLen=%u\n",
+                  buf->receivedCount, buf->totalFragments, (unsigned)buf->dataLen);
+    Serial.flush();
 
     // Check if complete
-    uint8_t expectedMask = (1 << totalFragments) - 1;
-    if (buf->receivedMask == expectedMask) {
+    if (buf->receivedCount == buf->totalFragments) {
         // Reassembly complete!
-        BITCHAT_DEBUG_PRINTLN("Fragment reassembly complete (%u bytes)", (unsigned)buf->dataLen);
+        Serial.println("FRAGMENT: Reassembly complete, about to process");
+        Serial.flush();
+        Serial.printf("FRAGMENT: Total reassembled size: %u bytes\n", (unsigned)buf->dataLen);
+        Serial.flush();
 
-        // Create synthetic MESSAGE from reassembled data - static to avoid stack overflow
-        static BitchatMessage reassembled;
-        reassembled.version = msg.version;
-        reassembled.type = BITCHAT_MSG_MESSAGE;
-        reassembled.ttl = msg.ttl;
-        reassembled.timestamp = msg.timestamp;
-        reassembled.flags = msg.flags;
-        memcpy(reassembled.senderId, msg.senderId, 8);
-        memcpy(reassembled.recipientId, msg.recipientId, 8);
+        // The reassembled data IS the complete serialized original message
+        // Parse it using parseMessage() which handles decompression internally
+        Serial.println("FRAGMENT: Parsing reassembled message...");
+        Serial.flush();
 
-        // Copy reassembled data to payload
-        // Note: For very long messages, we truncate to avoid buffer overflow
-        size_t copyLen = buf->dataLen;
-        if (copyLen > BITCHAT_MAX_PAYLOAD_SIZE) {
-            Serial.printf("WARNING: Truncating reassembled message from %u to %u bytes\n",
-                          (unsigned)copyLen, (unsigned)BITCHAT_MAX_PAYLOAD_SIZE);
-            copyLen = BITCHAT_MAX_PAYLOAD_SIZE;
+        // Copy buffer data before releasing (parseMessage may be slow)
+        static uint8_t reassembledData[2048];
+        size_t dataLen = buf->dataLen;
+        if (dataLen > sizeof(reassembledData)) {
+            Serial.printf("FRAGMENT: ERROR: Reassembled data too large (%u > %u)\n",
+                          (unsigned)dataLen, (unsigned)sizeof(reassembledData));
+            Serial.flush();
+            buf->active = false;
+            return;
         }
-        memcpy(reassembled.payload, buf->data, copyLen);
-        reassembled.payloadLength = static_cast<uint16_t>(copyLen);
+        memcpy(reassembledData, buf->data, dataLen);
 
-        // Release buffer before processing (in case processing takes time)
+        // Release buffer before processing
         buf->active = false;
 
+        static BitchatMessage reassembled;
+        if (!BitchatProtocol::parseMessage(reassembledData, dataLen, reassembled)) {
+            Serial.println("FRAGMENT: Failed to parse reassembled message!");
+            Serial.flush();
+            BITCHAT_PACKETDUMP("FRAGMENT_PARSE_FAIL", reassembledData, dataLen > 64 ? 64 : dataLen);
+            return;
+        }
+
+        if (!BitchatProtocol::validateMessage(reassembled)) {
+            Serial.println("FRAGMENT: Reassembled message validation failed!");
+            Serial.flush();
+            return;
+        }
+
+        Serial.printf("FRAGMENT: Parsed OK - type=0x%02X, payloadLen=%u\n",
+                      reassembled.type, reassembled.payloadLength);
+        Serial.flush();
+
         // Process the reassembled message
+        Serial.println("FRAGMENT: About to call processBitchatMessage()");
+        Serial.flush();
         processBitchatMessage(reassembled);
+        Serial.println("FRAGMENT: processBitchatMessage() returned");
+        Serial.flush();
     }
+    Serial.println("FRAGMENT: >>> EXIT <<<");
+    Serial.flush();
 }
 
 // ============================================================================
@@ -1568,9 +1720,14 @@ void BitchatBridge::onMeshcoreGroupMessage(const mesh::GroupChannel& channel, ui
     // Add to message history for REQUEST_SYNC responses
     addToMessageHistory(msg);
 
+    // CRITICAL: Add to dedup cache BEFORE broadcasting to prevent re-relay loop
+    // When this message comes back via sync from other Bitchat peers, we'll recognize
+    // it as a duplicate and not relay it again to MeshCore
+    _duplicateCache.addMessage(msg);
+
     BITCHAT_PACKETDUMP("BLE_TX_FROM_MESH", msg.payload, msg.payloadLength);
     bool sent = _bleService.broadcastMessage(msg);
-    BITCHAT_DEBUG_PRINTLN("TX to Bitchat: %s (result=%d)", senderName, sent ? 1 : 0);
+    BITCHAT_DEBUG_PRINTLN("TX to Bitchat: %s (result=%d, added to dedup)", senderName, sent ? 1 : 0);
     Serial.println("BITCHAT_BRIDGE: <<< onMeshcoreGroupMessage() EXIT <<<");
 #endif
 }
