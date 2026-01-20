@@ -105,6 +105,12 @@ public:
      */
     void onServerDisconnect();
 
+    /**
+     * Restart advertising after connection (call from server connect callback)
+     * ESP32 BLE stops advertising when a connection is made
+     */
+    void onServerConnect();
+
 protected:
     // BLECharacteristicCallbacks
     void onWrite(BLECharacteristic* pCharacteristic) override;
@@ -128,8 +134,8 @@ private:
     volatile bool _pendingData;     // Data received, not yet parsed
 
     // Write buffer for reassembling fragmented BLE writes
-    // Size 512 to handle padded Bitchat messages (Android pads to 256 or 512 bytes)
-    uint8_t _writeBuffer[512];
+    // Size 1024 to handle long messages that compress to ~615 bytes (2 fragments)
+    uint8_t _writeBuffer[1024];
     size_t _writeBufferOffset;
     uint32_t _lastWriteTime;
     static const uint32_t WRITE_TIMEOUT_MS = 5000;

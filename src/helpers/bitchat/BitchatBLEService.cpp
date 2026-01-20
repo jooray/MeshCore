@@ -3,6 +3,7 @@
 #ifdef ESP32
 
 #include <Arduino.h>
+#include <esp_bt.h>  // For esp_ble_tx_power_set
 
 #if BITCHAT_DEBUG
   #define BITCHAT_DEBUG_PRINTLN(F, ...) Serial.printf("BITCHAT: " F "\n", ##__VA_ARGS__)
@@ -152,6 +153,18 @@ void BitchatBLEService::startAdvertising() {
 
     BLEAdvertising* advertising = _server->getAdvertising();
 
+    // Set max TX power for better range (+9 dBm is max for ESP32)
+    esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT, ESP_PWR_LVL_P9);
+    esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV, ESP_PWR_LVL_P9);
+    esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_CONN_HDL0, ESP_PWR_LVL_P9);
+    esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_CONN_HDL1, ESP_PWR_LVL_P9);
+    esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_CONN_HDL2, ESP_PWR_LVL_P9);
+
+    // Set moderate advertising parameters for battery efficiency
+    // 200-250ms interval balances discovery speed and power consumption
+    advertising->setMinInterval(0x140);  // 200ms minimum (0x140 * 0.625ms)
+    advertising->setMaxInterval(0x190);  // 250ms maximum (0x190 * 0.625ms)
+
     // Set Bitchat UUID in MAIN advertisement (required for Bitchat app discovery)
     // The Bitchat Android app filters on service UUID in main advertisement packet
     // BLE advertisement packet is max 31 bytes:
@@ -185,6 +198,24 @@ void BitchatBLEService::startAdvertising() {
 
 void BitchatBLEService::onServerDisconnect() {
     checkForDisconnects();
+
+    // Always restart advertising to remain discoverable
+    // ESP32 BLE stops advertising when a connection is made
+    if (_server != nullptr) {
+        BLEAdvertising* advertising = _server->getAdvertising();
+        advertising->start();
+        BITCHAT_DEBUG_PRINTLN("Restarted BLE advertising (clients: %d)", _bitchatClientCount);
+    }
+}
+
+void BitchatBLEService::onServerConnect() {
+    // Restart advertising to allow additional clients to discover us
+    // ESP32 BLE stops advertising when a connection is established
+    if (_server != nullptr) {
+        BLEAdvertising* advertising = _server->getAdvertising();
+        advertising->start();
+        BITCHAT_DEBUG_PRINTLN("Restarted BLE advertising after connect");
+    }
 }
 
 void BitchatBLEService::clearWriteBuffer() {
@@ -256,30 +287,62 @@ void BitchatBLEService::loop() {
     }
 
     // Handle deferred data processing (parsing moved out of BLE callback)
-    // Wait 100ms after last write before processing to allow multi-chunk messages to arrive
-    if (_pendingData && (now - _lastWriteTime >= 100)) {
+    // Wait 300ms after last write before processing to allow multi-fragment messages to arrive
+    // (Increased from 100ms to handle BLE timing variations with large messages)
+    if (_pendingData && (now - _lastWriteTime >= 300)) {
         _pendingData = false;
         BITCHAT_DEBUG_PRINTLN("Processing %zu buffered bytes", _writeBufferOffset);
 
-        // Try to parse as complete message
-        BitchatMessage msg;
-        if (BitchatProtocol::parseMessage(_writeBuffer, _writeBufferOffset, msg)) {
-            // Successfully parsed - validate and queue
+        // Parse ALL complete messages in buffer (not just the first one)
+        // This fixes fragment loss when multiple messages arrive in quick succession
+        size_t consumed = 0;
+        int msgCount = 0;
+        while (consumed < _writeBufferOffset) {
+            BitchatMessage msg;
+            size_t remaining = _writeBufferOffset - consumed;
+
+            if (!BitchatProtocol::parseMessage(_writeBuffer + consumed, remaining, msg)) {
+                break;  // No more complete messages
+            }
+
+            size_t msgSize = BitchatProtocol::getMessageSize(msg);
+            if (msgSize == 0 || msgSize > remaining) {
+                break;  // Incomplete message
+            }
+
             if (BitchatProtocol::validateMessage(msg)) {
                 BITCHAT_DEBUG_PRINTLN("Received Bitchat message: type=%02X, len=%d", msg.type, msg.payloadLength);
                 BITCHAT_PACKETDUMP("BLE_SERVICE_RX", msg.payload, msg.payloadLength);
                 queueMessage(msg);
+                msgCount++;
             } else {
                 BITCHAT_DEBUG_PRINTLN("Invalid Bitchat message received");
-                BITCHAT_PACKETDUMP("BLE_SERVICE_RX_INVALID", _writeBuffer, _writeBufferOffset);
+                BITCHAT_PACKETDUMP("BLE_SERVICE_RX_INVALID", _writeBuffer + consumed, msgSize);
             }
-            clearWriteBuffer();
-        } else if (_writeBufferOffset >= BITCHAT_HEADER_SIZE) {
-            // Have enough data to check expected size
-            size_t expectedMin = BitchatProtocol::getMessageSize(msg);
-            if (_writeBufferOffset > expectedMin + 100) {
-                BITCHAT_DEBUG_PRINTLN("Write buffer contains unparseable data, clearing");
+
+            consumed += msgSize;
+        }
+
+        BITCHAT_DEBUG_PRINTLN("Parsed %d messages, consumed %zu bytes", msgCount, consumed);
+
+        // Shift remaining unparsed data to front of buffer
+        if (consumed > 0) {
+            if (consumed < _writeBufferOffset) {
+                memmove(_writeBuffer, _writeBuffer + consumed, _writeBufferOffset - consumed);
+                _writeBufferOffset -= consumed;
+                BITCHAT_DEBUG_PRINTLN("Shifted %zu bytes, %zu remaining", consumed, _writeBufferOffset);
+            } else {
                 clearWriteBuffer();
+            }
+        } else if (_writeBufferOffset >= BITCHAT_HEADER_SIZE) {
+            // No messages parsed - check if buffer contains garbage
+            BitchatMessage msg;
+            if (BitchatProtocol::parseMessage(_writeBuffer, _writeBufferOffset, msg)) {
+                size_t expectedMin = BitchatProtocol::getMessageSize(msg);
+                if (_writeBufferOffset > expectedMin + 100) {
+                    BITCHAT_DEBUG_PRINTLN("Write buffer contains unparseable data, clearing");
+                    clearWriteBuffer();
+                }
             }
             // If parse fails but buffer size is reasonable, keep waiting for more data
         }

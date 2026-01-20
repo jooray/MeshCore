@@ -99,7 +99,8 @@ private:
     volatile bool _pendingData;
 
     // Write buffer for reassembling fragmented BLE writes
-    uint8_t _writeBuffer[512];
+    // 1024 bytes to handle long messages that compress to ~615 bytes (2 fragments)
+    uint8_t _writeBuffer[1024];
     size_t _writeBufferOffset;
     uint32_t _lastWriteTime;
     static const uint32_t WRITE_TIMEOUT_MS = 5000;

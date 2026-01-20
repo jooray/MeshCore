@@ -88,14 +88,15 @@ bool BitchatBLEService::beginStandalone(const char* deviceName, BitchatBLECallba
     strncpy(_deviceName, deviceName, sizeof(_deviceName) - 1);
     _deviceName[sizeof(_deviceName) - 1] = '\0';
 
-    // Configure connection parameters BEFORE begin() - set MTU to 517 (max BLE MTU)
-    // This matches ESP32's BLEDevice::setMTU(517)
+    // Configure connection parameters BEFORE begin()
+    // MTU 517 is standard max BLE MTU - allows writes up to 514 bytes
+    // setMaxLen(512) is the characteristic buffer size
     // Parameters: mtu_max, event_len, hvn_qsize, wrcmd_qsize
     Bluefruit.configPrphConn(517, BLE_GAP_EVENT_LENGTH_DEFAULT, BLE_GATTS_HVN_TX_QUEUE_SIZE_DEFAULT, BLE_GATTC_WRITE_CMD_TX_QUEUE_SIZE_DEFAULT);
 
     // Initialize Bluefruit
     Bluefruit.begin();
-    Bluefruit.setTxPower(4);  // Max power for better range
+    Bluefruit.setTxPower(8);  // Max power (+8 dBm) for better range
 
     // Set up connection callbacks
     Bluefruit.Periph.setConnectCallback(onConnect);
@@ -124,7 +125,8 @@ bool BitchatBLEService::beginStandalone(const char* deviceName, BitchatBLECallba
     // Configure the characteristic with READ, WRITE, WRITE_NR, NOTIFY properties
     _characteristic.setProperties(CHR_PROPS_READ | CHR_PROPS_WRITE | CHR_PROPS_WRITE_WO_RESP | CHR_PROPS_NOTIFY | CHR_PROPS_INDICATE);
     _characteristic.setPermission(SECMODE_OPEN, SECMODE_OPEN);  // Open security
-    _characteristic.setMaxLen(512);  // Support large Bitchat messages
+    // CRITICAL: Must be ≤512 or BLE service discovery breaks on NRF52
+    _characteristic.setMaxLen(512);
     _characteristic.setWriteCallback(onCharacteristicWrite);
     _characteristic.setCccdWriteCallback(onCharacteristicCccdWrite);
     _characteristic.begin();
@@ -221,29 +223,54 @@ void BitchatBLEService::loop() {
     // Wait 100ms after last write before processing to allow multi-chunk messages to arrive
     if (_pendingData && (now - _lastWriteTime >= 100)) {
         _pendingData = false;
-        BITCHAT_DEBUG_PRINTLN("Processing %u buffered bytes, first bytes: %02X %02X %02X %02X",
+        Serial.printf("BLE_LOOP: Processing %u bytes, flags byte=%02X\n",
             (unsigned)_writeBufferOffset,
-            _writeBufferOffset > 0 ? _writeBuffer[0] : 0,
-            _writeBufferOffset > 1 ? _writeBuffer[1] : 0,
-            _writeBufferOffset > 2 ? _writeBuffer[2] : 0,
-            _writeBufferOffset > 3 ? _writeBuffer[3] : 0);
+            _writeBufferOffset > 11 ? _writeBuffer[11] : 0);  // flags at offset 11
+        Serial.flush();
+
+        // Full buffer dump before parsing
+        Serial.println("REDUNDANT_DEBUG: ====== FULL BUFFER BEFORE PARSE ======");
+        for (size_t i = 0; i < _writeBufferOffset; i++) {
+            Serial.printf("%02X", _writeBuffer[i]);
+        }
+        Serial.println();
+        Serial.println("REDUNDANT_DEBUG: ====== END BUFFER ======");
+        Serial.flush();
+
+        // Parse header manually for debug output
+        if (_writeBufferOffset >= 14) {
+            uint8_t version = _writeBuffer[0];
+            uint8_t type = _writeBuffer[1];
+            uint8_t ttl = _writeBuffer[2];
+            uint8_t flags = _writeBuffer[11];
+            uint16_t payloadLen = (_writeBuffer[12] << 8) | _writeBuffer[13];
+            Serial.printf("REDUNDANT_DEBUG: HEADER: ver=%u type=0x%02X ttl=%u flags=0x%02X payloadLen=%u\n",
+                          version, type, ttl, flags, payloadLen);
+            Serial.flush();
+        }
 
         BitchatMessage msg;
-        if (BitchatProtocol::parseMessage(_writeBuffer, _writeBufferOffset, msg)) {
+        Serial.println("BLE_LOOP: Calling parseMessage...");
+        Serial.flush();
+        bool parseOk = BitchatProtocol::parseMessage(_writeBuffer, _writeBufferOffset, msg);
+        Serial.printf("BLE_LOOP: parseMessage returned %d\n", parseOk);
+        Serial.flush();
+
+        if (parseOk) {
             if (BitchatProtocol::validateMessage(msg)) {
-                BITCHAT_DEBUG_PRINTLN("Received Bitchat message: type=%02X, len=%d", msg.type, msg.payloadLength);
+                Serial.printf("BLE_LOOP: Valid msg type=0x%02X, len=%d\n", msg.type, msg.payloadLength);
+                Serial.flush();
                 queueMessage(msg);
             } else {
-                BITCHAT_DEBUG_PRINTLN("Invalid Bitchat message received (validation failed)");
+                Serial.println("BLE_LOOP: Validation failed");
             }
             clearWriteBuffer();
         } else {
-            BITCHAT_DEBUG_PRINTLN("Parse failed, have %u bytes, need more or invalid data", (unsigned)_writeBufferOffset);
+            Serial.printf("BLE_LOOP: Parse failed, have %u bytes\n", (unsigned)_writeBufferOffset);
             if (_writeBufferOffset >= BITCHAT_HEADER_SIZE) {
                 size_t expectedMin = BitchatProtocol::getMessageSize(msg);
-                BITCHAT_DEBUG_PRINTLN("Expected min size: %u", (unsigned)expectedMin);
                 if (_writeBufferOffset > expectedMin + 100) {
-                    BITCHAT_DEBUG_PRINTLN("Write buffer contains unparseable data, clearing");
+                    Serial.println("BLE_LOOP: Clearing unparseable data");
                     clearWriteBuffer();
                 }
             }
@@ -371,29 +398,93 @@ void BitchatBLEService::onDisconnect(uint16_t conn_handle, uint8_t reason) {
 }
 
 void BitchatBLEService::onCharacteristicWrite(uint16_t conn_handle, BLECharacteristic* chr, uint8_t* data, uint16_t len) {
+    // REDUNDANT_DEBUG: Entry point - if we don't see this, crash is in BLE stack
+    Serial.println("REDUNDANT_DEBUG: >>> onCharacteristicWrite ENTRY <<<");
+    Serial.flush();
+
+    Serial.printf("REDUNDANT_DEBUG: conn=%u, chr=%p, data=%p, len=%u\n",
+                  conn_handle, (void*)chr, (void*)data, len);
+    Serial.flush();
+
+    // Dump first 32 bytes of incoming data (hex)
+    Serial.print("REDUNDANT_DEBUG: data[0..31]: ");
+    for (uint16_t i = 0; i < len && i < 32; i++) {
+        Serial.printf("%02X ", data[i]);
+    }
+    Serial.println();
+    Serial.flush();
+
+    // Full packet hex dump for reconstruction
+    Serial.println("REDUNDANT_DEBUG: ====== FULL INCOMING PACKET ======");
+    for (uint16_t i = 0; i < len; i++) {
+        Serial.printf("%02X", data[i]);
+    }
+    Serial.println();
+    Serial.println("REDUNDANT_DEBUG: ====== END PACKET ======");
+    Serial.flush();
+
     Serial.print("BLE_WRITE_CB: len=");
     Serial.println(len);
+    Serial.flush();
 
-    if (_instance == nullptr || len == 0) {
-        Serial.println("BLE_WRITE_CB: null instance or zero len");
+    if (_instance == nullptr) {
+        Serial.println("REDUNDANT_DEBUG: _instance is NULL!");
+        Serial.flush();
+        return;
+    }
+    if (len == 0) {
+        Serial.println("REDUNDANT_DEBUG: len is 0!");
+        Serial.flush();
         return;
     }
 
+    Serial.printf("REDUNDANT_DEBUG: _instance=%p, _writeBufferOffset=%u, bufSize=%u\n",
+                  (void*)_instance, (unsigned)_instance->_writeBufferOffset,
+                  (unsigned)sizeof(_instance->_writeBuffer));
+    Serial.flush();
+
     _instance->_lastWriteTime = millis();
     _instance->_pendingData = true;
+    Serial.println("REDUNDANT_DEBUG: updated lastWriteTime and pendingData");
+    Serial.flush();
 
     // Append to write buffer
     size_t copyLen = len;
     if (_instance->_writeBufferOffset + copyLen > sizeof(_instance->_writeBuffer)) {
-        Serial.println("BLE_WRITE_CB: buffer overflow, clearing");
+        Serial.printf("REDUNDANT_DEBUG: OVERFLOW! offset=%u + len=%u > bufSize=%u\n",
+                      (unsigned)_instance->_writeBufferOffset, (unsigned)copyLen,
+                      (unsigned)sizeof(_instance->_writeBuffer));
+        Serial.flush();
         _instance->clearWriteBuffer();
         copyLen = (len > sizeof(_instance->_writeBuffer)) ? sizeof(_instance->_writeBuffer) : len;
+        Serial.printf("REDUNDANT_DEBUG: after clear, copyLen=%u\n", (unsigned)copyLen);
+        Serial.flush();
     }
 
+    Serial.printf("REDUNDANT_DEBUG: memcpy %u bytes to _writeBuffer[%u]\n",
+                  (unsigned)copyLen, (unsigned)_instance->_writeBufferOffset);
+    Serial.flush();
+
     memcpy(&_instance->_writeBuffer[_instance->_writeBufferOffset], data, copyLen);
+
+    Serial.println("REDUNDANT_DEBUG: memcpy done");
+    Serial.flush();
+
     _instance->_writeBufferOffset += copyLen;
     Serial.print("BLE_WRITE_CB: buffer now ");
     Serial.println(_instance->_writeBufferOffset);
+    Serial.flush();
+
+    // Dump full buffer content (first 64 bytes) for debugging
+    Serial.print("REDUNDANT_DEBUG: buffer[0..63]: ");
+    for (size_t i = 0; i < _instance->_writeBufferOffset && i < 64; i++) {
+        Serial.printf("%02X ", _instance->_writeBuffer[i]);
+    }
+    Serial.println();
+    Serial.flush();
+
+    Serial.println("REDUNDANT_DEBUG: >>> onCharacteristicWrite EXIT <<<");
+    Serial.flush();
 }
 
 void BitchatBLEService::onCharacteristicCccdWrite(uint16_t conn_handle, BLECharacteristic* chr, uint16_t cccd_value) {
