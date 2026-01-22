@@ -7,28 +7,69 @@ The Bitchat Bridge enables communication between the [Bitchat](https://bitchat.a
 - **Bridge Direction**: Bidirectional - messages flow both ways between Bitchat and MeshCore
 - **Channel**: Only the `#mesh` channel is bridged (hardcoded)
 - **Identification**: Messages from Bitchat users appear with a phone emoji prefix on MeshCore nodes
-- **Platform**: ESP32 only (requires ESP32 ROM miniz for decompression)
+- **Platforms**: ESP32 (full support) and NRF52 (limited - short messages only)
 
 ## Supported Boards
 
-The following ESP32 boards have `_companion_radio_usb_bitchat` targets:
+### ESP32-based (19 targets) - Full Support
 
-| Board | Target Name |
-|-------|-------------|
-| Heltec LoRa32 V2 | `Heltec_v2_companion_radio_usb_bitchat` |
-| Heltec LoRa32 V3 | `Heltec_v3_companion_radio_usb_bitchat` |
-| Heltec Wireless Stick Lite V3 | `Heltec_WSL3_companion_radio_usb_bitchat` |
-| Heltec CT62 | `Heltec_ct62_companion_radio_usb_bitchat` |
-| Heltec Tracker V2 | `heltec_tracker_v2_companion_radio_usb_bitchat` |
-| LilyGo T3-S3 (SX1262) | `LilyGo_T3S3_sx1262_companion_radio_usb_bitchat` |
-| LilyGo T-Deck | `LilyGo_TDeck_companion_radio_usb_bitchat` |
-| LilyGo TLora V2.1 | `LilyGo_TLora_V2_1_1_6_companion_radio_usb_bitchat` |
-| Station G2 | `Station_G2_companion_radio_usb_bitchat` |
-| Seeed Xiao C3 | `Xiao_C3_companion_radio_usb_bitchat` |
-| Seeed Xiao S3 WIO | `Xiao_S3_WIO_companion_radio_usb_bitchat` |
-| Ebyte EoRa-S3 | `Ebyte_EoRa-S3_companion_radio_usb_bitchat` |
+ESP32 boards support long/compressed messages via ROM-based miniz decompression.
 
-**Note**: NRF52-based boards are not supported because Bitchat message decompression requires the ESP32 ROM miniz library.
+| Board | Target | MCU | Tested |
+|-------|--------|-----|--------|
+| Heltec LoRa32 V2 | `Heltec_v2_companion_radio_usb_bitchat` | ESP32 | |
+| Heltec LoRa32 V3 | `Heltec_v3_companion_radio_usb_bitchat` | ESP32-S3 | |
+| Heltec WSL3 | `Heltec_WSL3_companion_radio_usb_bitchat` | ESP32-S3 | ✓ |
+| Heltec LoRa32 V4 | `heltec_v4_companion_radio_usb_bitchat` | ESP32-S3 | |
+| Heltec CT62 | `Heltec_ct62_companion_radio_usb_bitchat` | ESP32-C3 | |
+| Heltec Tracker V2 | `heltec_tracker_v2_companion_radio_usb_bitchat` | ESP32 | |
+| LilyGo T3-S3 SX1262 | `LilyGo_T3S3_sx1262_companion_radio_usb_bitchat` | ESP32-S3 | |
+| LilyGo T3-S3 SX1276 | `LilyGo_T3S3_sx1276_companion_radio_usb_bitchat` | ESP32-S3 | |
+| LilyGo T-Deck | `LilyGo_TDeck_companion_radio_usb_bitchat` | ESP32-S3 | |
+| LilyGo T-Lora V2.1 | `LilyGo_TLora_V2_1_1_6_companion_radio_usb_bitchat` | ESP32 | ✓ |
+| Station G2 | `Station_G2_companion_radio_usb_bitchat` | ESP32 | |
+| Seeed Xiao C3 | `Xiao_C3_companion_radio_usb_bitchat` | ESP32-C3 | |
+| Seeed Xiao S3 WIO | `Xiao_S3_WIO_companion_radio_usb_bitchat` | ESP32-S3 | |
+| Ebyte EoRa-S3 | `Ebyte_EoRa-S3_companion_radio_usb_bitchat` | ESP32-S3 | |
+| Meshadventurer SX1262 | `Meshadventurer_sx1262_companion_radio_usb_bitchat` | ESP32 | |
+| Meshadventurer SX1268 | `Meshadventurer_sx1268_companion_radio_usb_bitchat` | ESP32 | |
+| ThinkNode M2 | `ThinkNode_M2_companion_radio_usb_bitchat` | ESP32-S3 | |
+| ThinkNode M5 | `ThinkNode_M5_companion_radio_usb_bitchat` | ESP32-S3 | |
+
+### NRF52-based (18 targets) - Limited Support
+
+NRF52 boards do **not** support long/compressed messages due to heap constraints (SoftDevice BLE reserves significant memory). Short messages (<256 bytes uncompressed) work fine.
+
+| Board | Target | Tested |
+|-------|--------|--------|
+| Wio Tracker L1 Pro | `WioTrackerL1_companion_radio_usb_bitchat` | ✓ |
+| RAK 4631 | `RAK_4631_companion_radio_usb_bitchat` | |
+| RAK WisMesh Tag | `RAK_WisMesh_Tag_companion_radio_usb_bitchat` | |
+| Seeed Xiao NRF52 | `Xiao_nrf52_companion_radio_usb_bitchat` | |
+| LilyGo T-Echo | `LilyGo_T-Echo_companion_radio_usb_bitchat` | |
+| Heltec Mesh Solar | `Heltec_mesh_solar_companion_radio_usb_bitchat` | |
+| Heltec T114 | `Heltec_t114_companion_radio_usb_bitchat` | |
+| Heltec T114 (no display) | `Heltec_t114_without_display_companion_radio_usb_bitchat` | |
+| Keepteen LT1 | `KeepteenLT1_companion_radio_usb_bitchat` | |
+| Mesh Pocket | `Mesh_pocket_companion_radio_usb_bitchat` | |
+| Pro Micro | `ProMicro_companion_radio_usb_bitchat` | |
+| SenseCap Solar | `SenseCap_Solar_companion_radio_usb_bitchat` | |
+| ThinkNode M1 | `ThinkNode_M1_companion_radio_usb_bitchat` | |
+| Nano G2 Ultra | `Nano_G2_Ultra_companion_radio_usb_bitchat` | |
+| Ikoka Handheld | `ikoka_handheld_nrf_e22_30dbm_companion_radio_usb_bitchat` | |
+| Ikoka Stick | `ikoka_stick_nrf_30dbm_companion_radio_usb_bitchat` | |
+| Ikoka Nano | `ikoka_nano_nrf_30dbm_companion_radio_usb_bitchat` | |
+| Minewsemi ME25LS01 | `Minewsemi_me25ls01_companion_radio_usb_bitchat` | |
+| T1000-E | `t1000e_companion_radio_usb_bitchat` | |
+
+### Long Message Support
+
+| Platform | Long Messages | Reason |
+|----------|---------------|--------|
+| ESP32/S3/C3 | ✓ Yes | ROM-based miniz (no heap usage) |
+| NRF52 | ✗ No | Heap too small for miniz + SoftDevice BLE |
+
+**Recommendation**: Use ESP32-based boards for full Bitchat functionality.
 
 ## Build Targets
 
@@ -91,7 +132,9 @@ MeshCore packets have a ~127-byte payload limit. Long Bitchat messages are autom
 
 4. **No file/image transfer**: Bitchat file transfers (images, etc.) are not supported on the mesh.
 
-5. **Time synchronization**: The bridge synchronizes its clock from incoming Bitchat packets. If no Bitchat client connects, timestamps may be inaccurate. Time needs to be accurate for Bitchat to work
+5. **Time synchronization**: The bridge synchronizes its clock from incoming Bitchat packets. If no Bitchat client connects, timestamps may be inaccurate. Time needs to be accurate for Bitchat to work.
+
+6. **NRF52 long message limitation**: NRF52 devices cannot decompress long/compressed Bitchat messages due to heap constraints. Messages >256 bytes (before compression) may fail on NRF52.
 
 ## Debugging
 
@@ -141,8 +184,33 @@ This matches MeshCore's hashtag room key derivation.
 
 ### Protocol Support
 
-- Message decompression (zlib via ESP32 ROM miniz)
+- Message decompression (zlib via ESP32 ROM miniz, ESP32 only)
 - Ed25519 message signing
 - Peer announcement/discovery
 - REQUEST_SYNC handling (sends cached messages)
 - Fragment reassembly for long messages
+
+## Release Builds
+
+To build all bitchat targets for a release:
+
+```bash
+export FIRMWARE_VERSION=v0.2-bitchat
+
+# Build individual targets
+sh build.sh build-firmware Heltec_WSL3_companion_radio_usb_bitchat
+
+# Or build all targets manually
+for target in \
+  Heltec_v2_companion_radio_usb_bitchat \
+  Heltec_v3_companion_radio_usb_bitchat \
+  Heltec_WSL3_companion_radio_usb_bitchat \
+  # ... add all targets
+do
+  sh build.sh build-firmware $target
+done
+```
+
+Output files:
+- ESP32: `.bin` + `-merged.bin` files
+- NRF52: `.uf2` + `.zip` files

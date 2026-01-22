@@ -363,6 +363,17 @@ void BitchatBLEService::loop() {
 
     // Process queued messages
     processQueue();
+
+    // Safety: periodically restart advertising if no clients connected
+    // This handles cases where ESP32 BLE stack silently stops advertising
+    if (_server != nullptr && _bitchatClientCount == 0 && _server->getConnectedCount() == 0) {
+        static uint32_t lastAdvRestart = 0;
+        if (now - lastAdvRestart > 30000) {  // Every 30 seconds
+            BLEAdvertising* advertising = _server->getAdvertising();
+            advertising->start();
+            lastAdvRestart = now;
+        }
+    }
 }
 
 void BitchatBLEService::onWrite(BLECharacteristic* pCharacteristic) {

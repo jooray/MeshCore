@@ -598,6 +598,21 @@ void BitchatBridge::loop() {
 }
 
 #if defined(ESP32)
+
+// BLE Server callbacks for standalone mode
+// Forwards connect/disconnect events to BitchatBLEService so advertising is restarted
+class StandaloneBLEServerCallbacks : public BLEServerCallbacks {
+    BitchatBLEService* _bleService;
+public:
+    StandaloneBLEServerCallbacks(BitchatBLEService* service) : _bleService(service) {}
+    void onConnect(BLEServer* pServer) override {
+        _bleService->onServerConnect();
+    }
+    void onDisconnect(BLEServer* pServer) override {
+        _bleService->onServerDisconnect();
+    }
+};
+
 bool BitchatBridge::attachBLEService(BLEServer* server) {
     if (!_bleService.attachToServer(server, this)) {
         BITCHAT_DEBUG_PRINTLN("Failed to attach BLE service");
@@ -622,6 +637,10 @@ bool BitchatBridge::beginStandalone(const char* deviceName) {
     if (server == nullptr) {
         return false;
     }
+
+    // Register server callbacks to restart advertising on connect/disconnect
+    // Without this, ESP32 stops advertising after first connection and never restarts
+    server->setCallbacks(new StandaloneBLEServerCallbacks(&_bleService));
 
     // Attach Bitchat service to the server
     if (!_bleService.attachToServer(server, this)) {
