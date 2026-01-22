@@ -8,7 +8,12 @@
 #define BITCHAT_HEADER_SIZE 14  // version(1) + type(1) + ttl(1) + timestamp(8) + flags(1) + payloadLength(2)
 #define BITCHAT_SIGNATURE_SIZE 64  // Ed25519 signature
 #define BITCHAT_MAX_WIRE_PAYLOAD_SIZE 245  // Max payload size on wire (compressed/padded)
-#define BITCHAT_MAX_PAYLOAD_SIZE 2048  // Max decompressed payload size (heap-allocated decompression allows larger sizes)
+// Max decompressed payload size - reduced on NRF52 to save RAM (1KB vs 2KB)
+#if defined(NRF52_PLATFORM)
+  #define BITCHAT_MAX_PAYLOAD_SIZE 1024  // 1KB for NRF52 (saves 1KB RAM)
+#else
+  #define BITCHAT_MAX_PAYLOAD_SIZE 2048  // 2KB for other platforms
+#endif
 #define BITCHAT_VERSION 1
 #define BITCHAT_SENDER_ID_SIZE 8
 #define BITCHAT_RECIPIENT_ID_SIZE 8

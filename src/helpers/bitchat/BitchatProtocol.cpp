@@ -1,4 +1,5 @@
 #include "BitchatProtocol.h"
+#include "BitchatBridge.h"  // For shared decompression buffers
 #include "../../Utils.h"
 
 // Platform-specific miniz includes for DEFLATE decompression
@@ -11,9 +12,11 @@
   }
   #define BITCHAT_HAS_DECOMPRESSION 1
 #elif defined(NRF52_PLATFORM)
-  // Use portable miniz library for NRF52
-  #include "../miniz/miniz_tinfl.h"
-  #define BITCHAT_HAS_DECOMPRESSION 1
+  // NRF52: Decompression DISABLED due to heap constraints
+  // The SoftDevice BLE stack + miniz decompressor (~10KB) exhausts heap
+  // Long/compressed messages will be rejected on NRF52
+  // See CLAUDE.md "NRF52 Bitchat Limitations" for details
+  #define BITCHAT_HAS_DECOMPRESSION 0
 #else
   // No decompression support on other platforms
   #define BITCHAT_HAS_DECOMPRESSION 0
@@ -248,22 +251,19 @@ bool BitchatProtocol::parseMessage(const uint8_t* data, size_t length, BitchatMe
                 return false;
             }
 
-            // Use streaming tinfl API with heap-allocated decompressor to avoid stack overflow
-            // tinfl_decompress_mem_to_mem allocates ~10KB decompressor internally on stack
-            Serial.printf("PARSE: malloc decompressor (%u bytes)...\n", (unsigned)sizeof(tinfl_decompressor));
+            // Use shared static decompression buffers (allocated once during BitchatBridge::begin())
+            // This avoids malloc failures when heap is fragmented during message processing
+            Serial.printf("PARSE: Getting static decompressor (%u bytes)...\n", (unsigned)sizeof(tinfl_decompressor));
             Serial.flush();
-            tinfl_decompressor* decomp = (tinfl_decompressor*)malloc(sizeof(tinfl_decompressor));
-            Serial.printf("PARSE: malloc buffer (%u bytes)...\n", BITCHAT_MAX_PAYLOAD_SIZE);
-            Serial.flush();
-            uint8_t* decompBuffer = (uint8_t*)malloc(BITCHAT_MAX_PAYLOAD_SIZE);
+            tinfl_decompressor* decomp = BitchatBridge::getDecompressor();
+            uint8_t* decompBuffer = BitchatBridge::getDecompBuffer();
 
             if (decomp == nullptr || decompBuffer == nullptr) {
-                Serial.println("PARSE: malloc failed!");
-                if (decomp) free(decomp);
-                if (decompBuffer) free(decompBuffer);
+                Serial.println("PARSE: Decompression buffers not allocated!");
+                Serial.println("PARSE: This indicates BitchatBridge::begin() was not called or allocation failed.");
                 return false;
             }
-            Serial.println("PARSE: malloc OK, initializing decompressor...");
+            Serial.println("PARSE: Got static buffers OK, initializing decompressor...");
             Serial.flush();
 
             tinfl_init(decomp);
@@ -311,9 +311,10 @@ bool BitchatProtocol::parseMessage(const uint8_t* data, size_t length, BitchatMe
             }
 
             if (status != TINFL_STATUS_DONE) {
-                Serial.println("PARSE: Decompression failed completely");
-                free(decomp);
-                free(decompBuffer);
+                Serial.printf("PARSE: Decompression failed with status=%d (expected %d)\n",
+                              status, TINFL_STATUS_DONE);
+                Serial.flush();
+                // Note: Static buffers are not freed here (reused for all decompressions)
                 return false;
             }
             Serial.printf("PARSE: Decompression SUCCESS, outBytes=%u\n", (unsigned)outBytes);
@@ -323,16 +324,14 @@ bool BitchatProtocol::parseMessage(const uint8_t* data, size_t length, BitchatMe
             if (outBytes > BITCHAT_MAX_PAYLOAD_SIZE) {
                 Serial.printf("ERROR: Decompressed size %u exceeds buffer %u!\n",
                               (unsigned)outBytes, (unsigned)BITCHAT_MAX_PAYLOAD_SIZE);
-                free(decomp);
-                free(decompBuffer);
+                // Note: Static buffers are not freed here (reused for all decompressions)
                 return false;
             }
 
             // Copy decompressed data to message payload
             size_t decompressedLen = outBytes;
             memcpy(msg.payload, decompBuffer, decompressedLen);
-            free(decomp);
-            free(decompBuffer);
+            // Note: Static buffers are not freed here (kept allocated for reuse)
 
             msg.payloadLength = static_cast<uint16_t>(decompressedLen);
             msg.flags &= ~BITCHAT_FLAG_IS_COMPRESSED;  // Clear compressed flag
@@ -663,7 +662,17 @@ bool BitchatProtocol::decompressPayload(BitchatMessage& msg) {
         return false;
     }
 
-    // Use heap-allocated decompressor and buffer to avoid stack overflow
+#if defined(NRF52_PLATFORM)
+    // Use static buffers from BitchatBridge to avoid heap fragmentation
+    tinfl_decompressor* decomp = BitchatBridge::getDecompressor();
+    uint8_t* decompBuffer = BitchatBridge::getDecompBuffer();
+
+    if (decomp == nullptr || decompBuffer == nullptr) {
+        Serial.println("DECOMPRESS: Static buffers not available!");
+        return false;
+    }
+#else
+    // ESP32: Use heap allocation (has more RAM and uses ROM miniz)
     tinfl_decompressor* decomp = (tinfl_decompressor*)malloc(sizeof(tinfl_decompressor));
     uint8_t* decompBuffer = (uint8_t*)malloc(BITCHAT_MAX_PAYLOAD_SIZE);
 
@@ -673,6 +682,7 @@ bool BitchatProtocol::decompressPayload(BitchatMessage& msg) {
         if (decompBuffer) free(decompBuffer);
         return false;
     }
+#endif
 
     tinfl_init(decomp);
 
@@ -715,8 +725,10 @@ bool BitchatProtocol::decompressPayload(BitchatMessage& msg) {
 
     if (status != TINFL_STATUS_DONE) {
         Serial.println("DECOMPRESS: Decompression failed");
+#if !defined(NRF52_PLATFORM)
         free(decomp);
         free(decompBuffer);
+#endif
         return false;
     }
 
@@ -726,8 +738,10 @@ bool BitchatProtocol::decompressPayload(BitchatMessage& msg) {
     // Bounds check
     if (outBytes > BITCHAT_MAX_PAYLOAD_SIZE) {
         Serial.printf("DECOMPRESS: Decompressed size %u exceeds buffer!\n", (unsigned)outBytes);
+#if !defined(NRF52_PLATFORM)
         free(decomp);
         free(decompBuffer);
+#endif
         return false;
     }
 
@@ -736,8 +750,10 @@ bool BitchatProtocol::decompressPayload(BitchatMessage& msg) {
     msg.payloadLength = static_cast<uint16_t>(outBytes);
     msg.flags &= ~BITCHAT_FLAG_IS_COMPRESSED;  // Clear compressed flag
 
+#if !defined(NRF52_PLATFORM)
     free(decomp);
     free(decompBuffer);
+#endif
 
     return true;
 #else

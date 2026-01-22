@@ -4,31 +4,6 @@
 
 #include <Arduino.h>
 
-// HardFault handler - catches crashes and prints debug info
-extern "C" {
-  void HardFault_Handler(void) {
-    Serial.println("\n\n!!! HARDFAULT DETECTED !!!");
-    Serial.println("Crash - likely stack overflow or memory corruption");
-    Serial.flush();
-
-    // Blink LED rapidly to indicate crash
-    #ifdef LED_BUILTIN
-    pinMode(LED_BUILTIN, OUTPUT);
-    #endif
-
-    while(1) {
-      #ifdef LED_BUILTIN
-      digitalWrite(LED_BUILTIN, HIGH);
-      delay(100);
-      digitalWrite(LED_BUILTIN, LOW);
-      delay(100);
-      #else
-      delay(200);
-      #endif
-    }
-  }
-}
-
 // Debug output - Adafruit nRF52 core supports Serial.printf
 #if BITCHAT_DEBUG
   #define BITCHAT_DEBUG_PRINTLN(...) do { Serial.printf("BITCHAT_BLE: "); Serial.printf(__VA_ARGS__); Serial.println(); } while(0)
@@ -269,29 +244,12 @@ void BitchatBLEService::loop() {
     // Wait 100ms after last write before processing to allow multi-chunk messages to arrive
     if (_pendingData && (now - _lastWriteTime >= 100)) {
         _pendingData = false;
-        Serial.printf("BLE_LOOP: Processing %u bytes, flags byte=%02X\n",
-            (unsigned)_writeBufferOffset,
-            _writeBufferOffset > 11 ? _writeBuffer[11] : 0);  // flags at offset 11
-        Serial.flush();
+        BITCHAT_DEBUG_PRINTLN("Processing %u bytes", (unsigned)_writeBufferOffset);
 
-        // Full buffer dump before parsing
-        Serial.println("REDUNDANT_DEBUG: ====== FULL BUFFER BEFORE PARSE ======");
-        for (size_t i = 0; i < _writeBufferOffset; i++) {
-            Serial.printf("%02X", _writeBuffer[i]);
-        }
-        Serial.println();
-        Serial.println("REDUNDANT_DEBUG: ====== END BUFFER ======");
-        Serial.flush();
-
-        // Parse header manually for debug output
+        // Parse header for debug (minimal logging)
         if (_writeBufferOffset >= 14) {
-            uint8_t version = _writeBuffer[0];
             uint8_t type = _writeBuffer[1];
-            uint8_t ttl = _writeBuffer[2];
-            uint8_t flags = _writeBuffer[11];
-            uint16_t payloadLen = (_writeBuffer[12] << 8) | _writeBuffer[13];
-            Serial.printf("REDUNDANT_DEBUG: HEADER: ver=%u type=0x%02X ttl=%u flags=0x%02X payloadLen=%u\n",
-                          version, type, ttl, flags, payloadLen);
+            BITCHAT_DEBUG_PRINTLN("Message type=0x%02X", type);
             Serial.flush();
         }
 
@@ -344,22 +302,10 @@ void BitchatBLEService::loop() {
     // Process queued messages
     processQueue();
 
+    // Simplified checkpoint logging - reduced stack usage
     if (justConnected) {
-        Serial.println("DEBUG_CRASH: BLE loop after connect - checkpoint 4 (after processQueue)");
-        Serial.flush();
-    }
-
-    // Debug: mark end of loop iteration if we processed something
-    static uint32_t lastLoopPrint = 0;
-    if (now - lastLoopPrint > 5000) {
-        Serial.println("BLE_SERVICE: loop() heartbeat");
-        lastLoopPrint = now;
-    }
-
-    if (justConnected) {
-        Serial.println("DEBUG_CRASH: BLE loop after connect - checkpoint 5 (loop end)");
-        Serial.flush();
-        justConnected = false;  // Only trace first iteration after connect
+        BITCHAT_DEBUG_PRINTLN("BLE loop after connect completed");
+        justConnected = false;
     }
 }
 
@@ -433,19 +379,6 @@ void BitchatBLEService::onConnect(uint16_t conn_handle) {
     if (_instance != nullptr) {
         _instance->_bitchatClientCount++;
         _instance->_pendingConnect = true;
-
-        // Log connection parameters for debugging
-        BLEConnection* conn = Bluefruit.Connection(conn_handle);
-        if (conn) {
-            BITCHAT_DEBUG_PRINTLN("=== Connection established ===");
-            // NRF52 printf doesn't support %f, use integer math instead
-            uint32_t intervalMs = (conn->getConnectionInterval() * 125) / 100;  // *1.25 as integer
-            BITCHAT_DEBUG_PRINTLN("Connection interval: %u ms", (unsigned)intervalMs);
-            BITCHAT_DEBUG_PRINTLN("Slave latency: %d", conn->getSlaveLatency());
-            BITCHAT_DEBUG_PRINTLN("Supervision timeout: %d ms", conn->getSupervisionTimeout() * 10);
-            BITCHAT_DEBUG_PRINTLN("MTU: %d", conn->getMtu());
-        }
-
         BITCHAT_DEBUG_PRINTLN("BLE client connected");
     }
 }
@@ -467,93 +400,25 @@ void BitchatBLEService::onDisconnect(uint16_t conn_handle, uint8_t reason) {
 }
 
 void BitchatBLEService::onCharacteristicWrite(uint16_t conn_handle, BLECharacteristic* chr, uint8_t* data, uint16_t len) {
-    // REDUNDANT_DEBUG: Entry point - if we don't see this, crash is in BLE stack
-    Serial.println("REDUNDANT_DEBUG: >>> onCharacteristicWrite ENTRY <<<");
-    Serial.flush();
-
-    Serial.printf("REDUNDANT_DEBUG: conn=%u, chr=%p, data=%p, len=%u\n",
-                  conn_handle, (void*)chr, (void*)data, len);
-    Serial.flush();
-
-    // Dump first 32 bytes of incoming data (hex)
-    Serial.print("REDUNDANT_DEBUG: data[0..31]: ");
-    for (uint16_t i = 0; i < len && i < 32; i++) {
-        Serial.printf("%02X ", data[i]);
-    }
-    Serial.println();
-    Serial.flush();
-
-    // Full packet hex dump for reconstruction
-    Serial.println("REDUNDANT_DEBUG: ====== FULL INCOMING PACKET ======");
-    for (uint16_t i = 0; i < len; i++) {
-        Serial.printf("%02X", data[i]);
-    }
-    Serial.println();
-    Serial.println("REDUNDANT_DEBUG: ====== END PACKET ======");
-    Serial.flush();
-
-    Serial.print("BLE_WRITE_CB: len=");
-    Serial.println(len);
-    Serial.flush();
-
-    if (_instance == nullptr) {
-        Serial.println("REDUNDANT_DEBUG: _instance is NULL!");
-        Serial.flush();
-        return;
-    }
-    if (len == 0) {
-        Serial.println("REDUNDANT_DEBUG: len is 0!");
-        Serial.flush();
+    // Simplified logging to reduce stack usage in hot path
+    if (_instance == nullptr || len == 0) {
         return;
     }
 
-    Serial.printf("REDUNDANT_DEBUG: _instance=%p, _writeBufferOffset=%u, bufSize=%u\n",
-                  (void*)_instance, (unsigned)_instance->_writeBufferOffset,
-                  (unsigned)sizeof(_instance->_writeBuffer));
-    Serial.flush();
+    BITCHAT_DEBUG_PRINTLN("BLE write: %u bytes", len);
 
     _instance->_lastWriteTime = millis();
     _instance->_pendingData = true;
-    Serial.println("REDUNDANT_DEBUG: updated lastWriteTime and pendingData");
-    Serial.flush();
 
     // Append to write buffer
     size_t copyLen = len;
     if (_instance->_writeBufferOffset + copyLen > sizeof(_instance->_writeBuffer)) {
-        Serial.printf("REDUNDANT_DEBUG: OVERFLOW! offset=%u + len=%u > bufSize=%u\n",
-                      (unsigned)_instance->_writeBufferOffset, (unsigned)copyLen,
-                      (unsigned)sizeof(_instance->_writeBuffer));
-        Serial.flush();
         _instance->clearWriteBuffer();
         copyLen = (len > sizeof(_instance->_writeBuffer)) ? sizeof(_instance->_writeBuffer) : len;
-        Serial.printf("REDUNDANT_DEBUG: after clear, copyLen=%u\n", (unsigned)copyLen);
-        Serial.flush();
     }
-
-    Serial.printf("REDUNDANT_DEBUG: memcpy %u bytes to _writeBuffer[%u]\n",
-                  (unsigned)copyLen, (unsigned)_instance->_writeBufferOffset);
-    Serial.flush();
 
     memcpy(&_instance->_writeBuffer[_instance->_writeBufferOffset], data, copyLen);
-
-    Serial.println("REDUNDANT_DEBUG: memcpy done");
-    Serial.flush();
-
     _instance->_writeBufferOffset += copyLen;
-    Serial.print("BLE_WRITE_CB: buffer now ");
-    Serial.println(_instance->_writeBufferOffset);
-    Serial.flush();
-
-    // Dump full buffer content (first 64 bytes) for debugging
-    Serial.print("REDUNDANT_DEBUG: buffer[0..63]: ");
-    for (size_t i = 0; i < _instance->_writeBufferOffset && i < 64; i++) {
-        Serial.printf("%02X ", _instance->_writeBuffer[i]);
-    }
-    Serial.println();
-    Serial.flush();
-
-    Serial.println("REDUNDANT_DEBUG: >>> onCharacteristicWrite EXIT <<<");
-    Serial.flush();
 }
 
 void BitchatBLEService::onCharacteristicCccdWrite(uint16_t conn_handle, BLECharacteristic* chr, uint16_t cccd_value) {

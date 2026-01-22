@@ -11,6 +11,10 @@
 #include <Mesh.h>
 #include <Identity.h>
 
+// Forward declaration for decompression support
+struct tinfl_decompressor_tag;
+typedef struct tinfl_decompressor_tag tinfl_decompressor;
+
 // #mesh channel key: first 16 bytes of SHA256("#mesh")
 // This is a "hashtag room" where the key is derived from the channel name
 // Calculation: SHA256("#mesh").substring(0, 32) = "5b664cde0b08b220612113db980650f3"
@@ -177,6 +181,20 @@ public:
     uint32_t getMessagesRelayed() const { return _messagesRelayed; }
     uint32_t getDuplicatesDropped() const { return _duplicatesDropped; }
 
+    /**
+     * Get shared decompression buffers for BitchatProtocol
+     * These are allocated once during begin() and reused for all decompressions
+     * to avoid malloc failures when heap is fragmented.
+     * @return Decompressor context or nullptr if not allocated
+     */
+    static tinfl_decompressor* getDecompressor();
+
+    /**
+     * Get shared decompression buffer
+     * @return Buffer pointer or nullptr if not allocated
+     */
+    static uint8_t* getDecompBuffer();
+
 protected:
 #if defined(ESP32) || defined(NRF52_PLATFORM)
     // BitchatBLECallback implementation
@@ -194,7 +212,8 @@ private:
     BitchatBLEService _bleService;
 #endif
 
-    BitchatDuplicateCache _duplicateCache;
+    // Static to keep ~1.2KB out of heap allocation
+    static BitchatDuplicateCache _duplicateCache;
 
     // Bitchat peer identity (derived from Meshcore identity)
     uint64_t _bitchatPeerId;
@@ -219,8 +238,14 @@ private:
     // Announcement timing
     uint32_t _lastAnnounceTime;
     volatile bool _pendingAnnounce;  // Flag to defer announcement to main loop (BLE callback has limited stack)
+    volatile bool _processingMessage;  // Guard against re-entrant message processing (prevents stack explosion)
     static const uint32_t ANNOUNCE_INTERVAL_MS = 5000;  // 5 seconds when idle
     static const uint32_t ANNOUNCE_INTERVAL_CONNECTED_MS = 3000;  // 3 seconds when client connected
+
+    // Fragment reassembly deferred processing (to avoid re-entrant call chains)
+    // Static to keep ~1.1KB out of heap allocation
+    static BitchatMessage _reassembledMsg;  // Buffer for reassembled message awaiting processing
+    bool _hasReassembledMsg;         // True when _reassembledMsg contains a message to process
 
     // Time synchronization (calibrated from received Bitchat packets)
     // Android sends Unix timestamps; we sync from them since ESP32 may not have valid RTC
@@ -247,9 +272,9 @@ private:
         uint32_t addedTimeMs;  // millis() when message was cached (for expiration)
         bool valid;
     };
-    static const size_t MESSAGE_HISTORY_SIZE = 16;
+    static const size_t MESSAGE_HISTORY_SIZE = 8;
     static const uint32_t MESSAGE_EXPIRY_MS = 300000;  // 5 minutes
-    // Static to keep ~34KB out of heap allocation (16 * ~2KB BitchatMessage)
+    // Static to keep ~17KB out of heap allocation (8 * ~2KB BitchatMessage)
     static CachedMessage _messageHistory[MESSAGE_HISTORY_SIZE];
     size_t _messageHistoryHead;
 
@@ -315,7 +340,8 @@ private:
         bool valid;
     };
     static const size_t PEER_CACHE_SIZE = 32;
-    PeerInfo _peerCache[PEER_CACHE_SIZE];
+    // Static to keep ~1KB out of heap allocation
+    static PeerInfo _peerCache[PEER_CACHE_SIZE];
 
     // Fragment reassembly buffers for long messages
     // Bitchat fragments messages >245 bytes into multiple FRAGMENT messages
@@ -540,4 +566,15 @@ private:
                                 char* senderNick, size_t senderNickLen,
                                 char* content, size_t contentLen,
                                 char* channelName, size_t channelNameLen);
+
+    // ============================================================================
+    // Decompression Buffers (Static, Shared)
+    // ============================================================================
+    // These are statically allocated at compile time (.bss section) to avoid
+    // malloc failures when heap is fragmented during message processing.
+    // Total allocation: 10,412 bytes (8364 + 2048) reserved before program runs
+#if defined(NRF52_PLATFORM)
+    static tinfl_decompressor _decompressorStatic;  // Decompressor context (~8.3KB)
+    static uint8_t _decompBufferStatic[BITCHAT_MAX_PAYLOAD_SIZE];  // Decompression buffer (2KB)
+#endif
 };

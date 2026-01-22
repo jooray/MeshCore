@@ -3,6 +3,10 @@
 #include <Arduino.h> // needed for PlatformIO
 #include <Mesh.h>
 
+#if defined(NRF52_PLATFORM)
+#include <helpers/nrf52/NRF52StaticPoolPacketManager.h>
+#endif
+
 #if defined(ENABLE_BITCHAT) && (defined(ESP32) || defined(NRF52_PLATFORM))
 #include <helpers/bitchat/BitchatBridge.h>
 #endif
@@ -122,6 +126,16 @@
 #define ERR_CODE_ILLEGAL_ARG            6
 
 #define MAX_SIGN_DATA_LEN               (8 * 1024) // 8K
+
+// NRF52 uses static packet pool to avoid heap fragmentation
+// ESP32 and other platforms continue using heap allocation
+#if defined(NRF52_PLATFORM)
+static NRF52StaticPoolPacketManager g_nrf52PacketManager;
+
+mesh::PacketManager& getNRF52PacketManager() {
+  return g_nrf52PacketManager;
+}
+#endif
 
 void MyMesh::writeOKFrame() {
   uint8_t buf[1];
@@ -750,7 +764,11 @@ uint32_t MyMesh::calcDirectTimeoutMillisFor(uint32_t pkt_airtime_millis, uint8_t
 void MyMesh::onSendTimeout() {}
 
 MyMesh::MyMesh(mesh::Radio &radio, mesh::RNG &rng, mesh::RTCClock &rtc, SimpleMeshTables &tables, DataStore& store, AbstractUITask* ui)
-    : BaseChatMesh(radio, *new ArduinoMillis(), rng, rtc, *new StaticPoolPacketManager(16), tables),
+#if defined(NRF52_PLATFORM)
+    : BaseChatMesh(radio, *new ArduinoMillis(), rng, rtc, getNRF52PacketManager(), tables),  // NRF52: static pool to avoid heap fragmentation
+#else
+    : BaseChatMesh(radio, *new ArduinoMillis(), rng, rtc, *new StaticPoolPacketManager(4), tables),  // Other platforms: heap allocation
+#endif
       _serial(NULL), telemetry(MAX_PACKET_PAYLOAD - 4), _store(&store), _ui(ui) {
   _iter_started = false;
   _cli_rescue = false;

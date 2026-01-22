@@ -2,6 +2,10 @@
 #include <Mesh.h>
 #include "MyMesh.h"
 
+#ifdef NRF52_SERIES
+extern "C" void print_stack_usage(void);
+#endif
+
 // Believe it or not, this std C function is busted on some platforms!
 static uint32_t _atoi(const char* sp) {
   uint32_t n = 0;
@@ -123,10 +127,7 @@ void setup() {
   while (!Serial && (millis() - serialWaitStart < 3000)) {
     delay(10);
   }
-  // Now serial port exists - give user time to connect their monitor
-  Serial.println("\n\n*** Waiting 5 seconds for serial monitor... ***");
-  Serial.flush();
-  delay(5000);
+  // Serial port ready - skip boot wait since crashes happen much later
   #endif
   Serial.println("\n\n=== BOOT START ===");
   Serial.flush();
@@ -134,6 +135,19 @@ void setup() {
   board.begin();
   Serial.println("board.begin() done");
   Serial.flush();
+
+#ifdef NRF52_SERIES
+  // Paint ISR stack with canary pattern for high-water marking
+  extern unsigned long __StackLimit;
+  extern unsigned long __StackTop;
+  uint32_t* isr_stack_ptr = (uint32_t*)&__StackLimit;
+  uint32_t isr_stack_words = ((uint32_t)&__StackTop - (uint32_t)&__StackLimit) / 4;
+  for (uint32_t i = 0; i < isr_stack_words; i++) {
+      isr_stack_ptr[i] = 0xa5a5a5a5;  // FreeRTOS canary pattern
+  }
+  Serial.println("ISR stack painted with canary pattern");
+  Serial.flush();
+#endif
 
 #ifdef DISPLAY_CLASS
   DisplayDriver* disp = NULL;
@@ -311,6 +325,15 @@ void loop() {
 #if defined(ENABLE_BITCHAT) && (defined(ESP32) || defined(NRF52_PLATFORM))
   if (bitchat_bridge != nullptr) {
     bitchat_bridge->loop();
+  }
+#endif
+
+#ifdef NRF52_SERIES
+  // Print stack usage every 10 seconds for diagnostics
+  static uint32_t last_stack_print = 0;
+  if (millis() - last_stack_print >= 10000) {
+    print_stack_usage();
+    last_stack_print = millis();
   }
 #endif
 }
