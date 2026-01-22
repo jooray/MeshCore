@@ -1,12 +1,35 @@
+## About the Bitchat Bridge
+
+This is a special experimental Bitchat bridge branch that allows
+you to create a special bridge device that will relay messages
+between Bitchat and MeshCore users.
+
+Read [my blog](https://juraj.bednar.io/en/blog-en/2026/01/18/bridging-bitchat-and-meshcore-resilient-communication-when-you-need-it-most/) and [documentation](docs/bitchat-bridge.md).
+
+Really, read the documentation, but companion_radio_usb_bitchat is
+the variant you want.  This variant will work only through USB
+serial (not bluetooth, since bluetooth connection is reserved for
+bitchat). Configure it through serial port (or just flash it without
+removing old config and it will retain old configuration).
+
+Join the #mesh where the messages will be relayed.
+
+## Support bitchat-bridge development
+
+If you like this project, I would appreciate if you contributed
+time, talent or treasure.
+
+Time and talent can be contributed by testing it out, fixing bugs
+and definitely submitting pull requests.
+
+Treasure can be [sent back through here](https://juraj.bednar.io/en/support-me/).
+
+
+# Original meshcore README.md follows...
+
 ## About MeshCore
 
 MeshCore is a lightweight, portable C++ library that enables multi-hop packet routing for embedded projects using LoRa and other packet radios. It is designed for developers who want to create resilient, decentralized communication networks that work without the internet.
-
-## About the Bitchat Bridge
-
-This is a special experimental Bitchat bridge branch.
-
-Read [my blog](https://juraj.bednar.io/en/blog-en/2026/01/18/bridging-bitchat-and-meshcore-resilient-communication-when-you-need-it-most/) and [documentation](docs/bitchat-bridge.md).
 
 
 ## 🔍 What is MeshCore?
