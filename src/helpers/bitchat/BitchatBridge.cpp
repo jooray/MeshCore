@@ -61,7 +61,6 @@ static void dumpPacketHex(const char* label, const uint8_t* data, size_t len) {
 #endif
 
 // Static member definitions to keep large buffers out of heap allocation
-char BitchatBridge::_pendingRelayContent[BITCHAT_MAX_PAYLOAD_SIZE];
 BitchatBridge::CachedMessage BitchatBridge::_messageHistory[MESSAGE_HISTORY_SIZE];
 BitchatBridge::FragmentBuffer BitchatBridge::_fragmentBuffers[MAX_FRAGMENT_BUFFERS];
 BitchatBridge::PendingPart BitchatBridge::_pendingParts[MAX_PENDING_PARTS];
@@ -1505,37 +1504,52 @@ void BitchatBridge::processPendingParts() {
 bool BitchatBridge::queuePendingRelay(const char* senderNick, const char* content, uint32_t bitchatTimestamp) {
     // Multi-bridge collision avoidance: queue message with random delay before relaying
     // This spreads out transmission attempts across bridges, avoiding RF collision
-    // With MAX_PENDING_RELAYS=1, if a relay is pending, we drop the new one (rare case)
 
-    // Check if slot is available (with single slot, just check index 0)
-    if (_pendingRelays[0].valid) {
-        BITCHAT_DEBUG_PRINTLN("Pending relay slot busy, dropping new message");
+    size_t contentLen = strlen(content);
+
+    // Long messages: send immediately (bypass delay queue)
+    // Rationale: long messages are rare and distinctive, MeshCore dedup handles them fine
+    // The splitter in relayChannelMessageToMesh_Internal() will handle them correctly
+    if (contentLen >= MAX_RELAY_CONTENT_SIZE) {
+        BITCHAT_DEBUG_PRINTLN("Long message (%u bytes), sending immediately (bypassing delay queue)", (unsigned)contentLen);
+        relayChannelMessageToMesh_Internal(senderNick, content, bitchatTimestamp);
+        return true;
+    }
+
+    // Short messages: queue with random delay for multi-bridge collision avoidance
+
+    // Find first empty slot
+    size_t slotIdx = MAX_PENDING_RELAYS;
+    for (size_t i = 0; i < MAX_PENDING_RELAYS; i++) {
+        if (!_pendingRelays[i].valid) {
+            slotIdx = i;
+            break;
+        }
+    }
+
+    if (slotIdx >= MAX_PENDING_RELAYS) {
+        BITCHAT_DEBUG_PRINTLN("All %u relay slots busy, dropping new message", (unsigned)MAX_PENDING_RELAYS);
         return false;
     }
 
+    PendingRelay& slot = _pendingRelays[slotIdx];
+
     // Store sender nick
-    strncpy(_pendingRelays[0].senderNick, senderNick,
-            sizeof(_pendingRelays[0].senderNick) - 1);
-    _pendingRelays[0].senderNick[sizeof(_pendingRelays[0].senderNick) - 1] = '\0';
+    strncpy(slot.senderNick, senderNick, sizeof(slot.senderNick) - 1);
+    slot.senderNick[sizeof(slot.senderNick) - 1] = '\0';
 
-    // Store content in shared buffer
-    size_t contentLen = strlen(content);
-    if (contentLen >= BITCHAT_MAX_PAYLOAD_SIZE) {
-        contentLen = BITCHAT_MAX_PAYLOAD_SIZE - 1;
-    }
-    memcpy(_pendingRelayContent, content, contentLen);
-    _pendingRelayContent[contentLen] = '\0';
-    _pendingRelays[0].contentOffset = 0;
-    _pendingRelays[0].contentLength = contentLen;
+    // Store content in inline buffer (guaranteed to fit due to check above)
+    memcpy(slot.content, content, contentLen);
+    slot.content[contentLen] = '\0';
 
-    _pendingRelays[0].bitchatTimestamp = bitchatTimestamp;
+    slot.bitchatTimestamp = bitchatTimestamp;
 
     // Random delay between 0 and MAX_RELAY_DELAY_MS milliseconds
     uint32_t randomDelay = random(0, MAX_RELAY_DELAY_MS);
-    _pendingRelays[0].sendAtMillis = millis() + randomDelay;
-    _pendingRelays[0].valid = true;
+    slot.sendAtMillis = millis() + randomDelay;
+    slot.valid = true;
 
-    BITCHAT_DEBUG_PRINTLN("Queued relay with %ums delay (multi-bridge dedup)", randomDelay);
+    BITCHAT_DEBUG_PRINTLN("Queued relay in slot %u with %ums delay (multi-bridge dedup)", (unsigned)slotIdx, randomDelay);
     return true;
 }
 
@@ -1548,15 +1562,12 @@ void BitchatBridge::processPendingRelays() {
     for (size_t i = 0; i < MAX_PENDING_RELAYS; i++) {
         if (_pendingRelays[i].valid && now >= _pendingRelays[i].sendAtMillis) {
             // Time to send this relay
-            BITCHAT_DEBUG_PRINTLN("Processing pending relay (ts=%u)", _pendingRelays[i].bitchatTimestamp);
-
-            // Get content from shared buffer (content is at offset 0 with single-slot design)
-            const char* content = &_pendingRelayContent[_pendingRelays[i].contentOffset];
+            BITCHAT_DEBUG_PRINTLN("Processing pending relay slot %u (ts=%u)", (unsigned)i, _pendingRelays[i].bitchatTimestamp);
 
             // Call the internal relay function that handles message splitting
             relayChannelMessageToMesh_Internal(
                 _pendingRelays[i].senderNick,
-                content,
+                _pendingRelays[i].content,
                 _pendingRelays[i].bitchatTimestamp
             );
 

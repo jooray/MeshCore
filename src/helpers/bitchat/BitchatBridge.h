@@ -499,22 +499,21 @@ private:
     // Solution: Random delay (0-3s) + use original Bitchat timestamp for deterministic packet hash
     // - Random delay spreads out transmission attempts, avoiding RF collision
     // - Original timestamp ensures all bridges produce identical packets → MeshCore dedup catches duplicates
+    // Per-entry content buffer size - 256 bytes covers most messages
+    // Longer messages will be truncated in the queue (still sent, just may lose data)
+    static const size_t MAX_RELAY_CONTENT_SIZE = 256;
+
     struct PendingRelay {
-        char senderNick[68];        // Sender nickname from Bitchat
-        uint16_t contentOffset;     // Offset into shared _pendingRelayContent buffer
-        uint16_t contentLength;     // Length of content in shared buffer
-        uint32_t bitchatTimestamp;  // Original Bitchat timestamp in seconds
-        uint32_t sendAtMillis;      // When to send (millis() + random delay)
+        char senderNick[68];                      // Sender nickname from Bitchat
+        char content[MAX_RELAY_CONTENT_SIZE];     // Message content (inline buffer)
+        uint32_t bitchatTimestamp;                // Original Bitchat timestamp in seconds
+        uint32_t sendAtMillis;                    // When to send (millis() + random delay)
         bool valid;
     };
-    // Single entry to minimize memory - multi-bridge collision avoidance only needs one pending relay
-    // If a second message arrives before the first is sent, the first is dropped (acceptable trade-off)
-    static const size_t MAX_PENDING_RELAYS = 1;
+    // 4 slots to handle message bursts - drops only occur if 4+ messages arrive within the 0-3s delay window
+    static const size_t MAX_PENDING_RELAYS = 4;
     static const uint32_t MAX_RELAY_DELAY_MS = 3000;  // 0-3 second random delay
     PendingRelay _pendingRelays[MAX_PENDING_RELAYS];
-    // Shared content buffer for pending relays - static to keep it out of heap allocation
-    // Only one relay is active at a time, so sharing is safe
-    static char _pendingRelayContent[BITCHAT_MAX_PAYLOAD_SIZE];
 
     /**
      * Queue a message part for delayed sending
