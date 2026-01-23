@@ -94,6 +94,15 @@ pio run -e Heltec_WSL3_companion_radio_usb_bitchat
 pio run -e Heltec_WSL3_companion_radio_usb_bitchat -t upload
 ```
 
+
+## Troubleshooting
+
+### I don't see the peer in my Bitchat app
+
+You probably used the same node with Meshcore Companion BLE node and
+your phone still connects to it. Unpair it in bluetooth settings.
+Bitchat does not require, nor supports pairing.
+
 ## How It Works
 
 ### Channel Bridging
