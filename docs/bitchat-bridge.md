@@ -145,6 +145,12 @@ MeshCore packets have a ~127-byte payload limit. Long Bitchat messages are autom
 
 6. **NRF52 long message limitation**: NRF52 devices cannot decompress long/compressed Bitchat messages due to heap constraints. Messages >256 bytes (before compression) may fail on NRF52.
 
+### Can I run this is a MeshCore repeater?
+
+No, it can only work as companion node, not a repeater. Unfortunately these nodes don't have enough RAM to do multiple jobs (MeshCore repeater + bitchat repeater). So you have to pick either-or. Anyway, it is also because you want it placed differently. MeshCore repeater should be on a hill, or on a roof of a very high building. If you put it somewhere close to people, you are basically jamming the spectrum and not helping the network. 
+
+On the other hand, the bitchat repeater should be where people are (Bluetooth needs to be really close)- in an office building, apartment, public square, close to ground. So you don't want to run both on the same device anyway.
+
 ## Debugging
 
 To enable debug output, use one of these methods:
