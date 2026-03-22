@@ -210,20 +210,13 @@ This matches MeshCore's hashtag room key derivation.
 To build all bitchat targets for a release:
 
 ```bash
-export FIRMWARE_VERSION=v0.2-bitchat
+export FIRMWARE_VERSION=v0.3-bitchat
 
 # Build individual targets
 sh build.sh build-firmware Heltec_WSL3_companion_radio_usb_bitchat
 
-# Or build all targets manually
-for target in \
-  Heltec_v2_companion_radio_usb_bitchat \
-  Heltec_v3_companion_radio_usb_bitchat \
-  Heltec_WSL3_companion_radio_usb_bitchat \
-  # ... add all targets
-do
-  sh build.sh build-firmware $target
-done
+# Build all Bitchat bridge targets
+sh build.sh build-bitchat-firmwares
 ```
 
 Output files:

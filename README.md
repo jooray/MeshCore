@@ -69,9 +69,11 @@ For developers;
 - Clone and open the MeshCore repository in Visual Studio Code.
 - See the example applications you can modify and run:
   - [Companion Radio](./examples/companion_radio) - For use with an external chat app, over BLE, USB or WiFi.
+  - [KISS Modem](./examples/kiss_modem) - Serial KISS protocol bridge for host applications. ([protocol docs](./docs/kiss_modem_protocol.md))
   - [Simple Repeater](./examples/simple_repeater) - Extends network coverage by relaying messages.
   - [Simple Room Server](./examples/simple_room_server) - A simple BBS server for shared Posts.
   - [Simple Secure Chat](./examples/simple_secure_chat) - Secure terminal based text communication between devices.
+  - [Simple Sensor](./examples/simple_sensor) - Remote sensor node with telemetry and alerting.
 
 The Simple Secure Chat example can be interacted with through the Serial Monitor in Visual Studio Code, or with a Serial USB Terminal on Android.
 
@@ -116,12 +118,14 @@ MeshCore is open-source software released under the MIT License. You are free to
 ## Contributing
 
 Please submit PR's using 'dev' as the base branch!
-For minor changes just submit your PR and I'll try to review it, but for anything more 'impactful' please open an Issue first and start a discussion. Is better to sound out what it is you want to achieve first, and try to come to a consensus on what the best approach is, especially when it impacts the structure or architecture of this codebase.
+For minor changes just submit your PR and we'll try to review it, but for anything more 'impactful' please open an Issue first and start a discussion. Is better to sound out what it is you want to achieve first, and try to come to a consensus on what the best approach is, especially when it impacts the structure or architecture of this codebase.
 
 Here are some general principals you should try to adhere to:
-* Keep it simple. Please, don't think like a high-level lang programmer. Think embedded, and keep code concise, without any unecessary layers.
+* Keep it simple. Please, don't think like a high-level lang programmer. Think embedded, and keep code concise, without any unnecessary layers.
 * No dynamic memory allocation, except during setup/begin functions.
 * Use the same brace and indenting style that's in the core source modules. (A .clang-format is prob going to be added soon, but please do NOT retroactively re-format existing code. This just creates unnecessary diffs that make finding problems harder)
+
+Help us prioritize! Please react with thumbs-up to issues/PRs you care about most. We look at reaction counts when planning work.
 
 ## Road-Map / To-Do
 
@@ -136,7 +140,7 @@ There are a number of fairly major features in the pipeline, with no particular 
 - [ ] Core + Apps: support for LZW message compression
 - [ ] Core: dynamic CR (Coding Rate) for weak vs strong hops
 - [ ] Core: new framework for hosting multiple virtual nodes on one physical device
-- [ ] V2 protocol spec: discussion and concensus around V2 packet protocol, including path hashes, new encryption specs, etc
+- [ ] V2 protocol spec: discussion and consensus around V2 packet protocol, including path hashes, new encryption specs, etc
 
 ## 📞 Get Support
 

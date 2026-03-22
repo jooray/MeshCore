@@ -35,6 +35,10 @@ int NRF52StaticPoolPacketManager::getOutboundCount(uint32_t now) const {
   return send_queue.countBefore(now);
 }
 
+int NRF52StaticPoolPacketManager::getOutboundTotal() const {
+  return send_queue.count();
+}
+
 int NRF52StaticPoolPacketManager::getFreeCount() const {
   return unused.count();
 }

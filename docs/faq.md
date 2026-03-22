@@ -1,11 +1,6 @@
-**MeshCore-FAQ**<!-- omit from toc -->
+# Frequently Asked Questions
+
 A list of frequently-asked questions and answers for MeshCore
-
-The current version of this MeshCore FAQ is at https://github.com/meshcore-dev/MeshCore/blob/main/docs/faq.md.  
-This MeshCore FAQ is also mirrored at https://github.com/LitBomb/MeshCore-FAQ and might have newer updates if pull requests on Scott's MeshCore repo are not approved yet.
-
-author: https://github.com/LitBomb<!-- omit from toc -->
----
 
 - [1. Introduction](#1-introduction)
   - [1.1. Q: What is MeshCore?](#11-q-what-is-meshcore)
@@ -28,8 +23,8 @@ author: https://github.com/LitBomb<!-- omit from toc -->
   - [3.4. Q: What is the password to join a room server?](#34-q-what-is-the-password-to-join-a-room-server)
   - [3.5. Q: Can I retrieve a repeater's private key or set a repeater's private key?](#35-q-can-i-retrieve-a-repeaters-private-key-or-set-a-repeaters-private-key)
   - [3.6. Q: The first byte of my repeater's public key collides with an exisitng repeater on the mesh.  How do I get a new private key with a matching public key that has its first byte of my choosing?](#36-q-the-first-byte-of-my-repeaters-public-key-collides-with-an-exisitng-repeater-on-the-mesh--how-do-i-get-a-new-private-key-with-a-matching-public-key-that-has-its-first-byte-of-my-choosing)
-  - [3.7. Q: My repeater maybe suffering from deafness due to high power interference near my mesh's frequency, it is not hearing other in-range MeshCore radios.  what can I do?](#37-q-my-repeater-maybe-suffering-from-deafness-due-to-high-power-interference-near-my-meshs-frequency-it-is-not-hearing-other-in-range-meshcore-radios--what-can-i-do)
-  - [3.8 Q: How do I make my repeater an observer on the mesh](#38-q-how-do-i-make-my-repeater-an-observer-on-the-mesh)
+  - [3.7. Q: My repeater maybe suffering from deafness due to high power interference near my mesh's frequency, it is not hearing other in-range MeshCore radios.  What can I do?](#37-q-my-repeater-maybe-suffering-from-deafness-due-to-high-power-interference-near-my-meshs-frequency-it-is-not-hearing-other-in-range-meshcore-radios--what-can-i-do)
+  - [3.8. Q: How do I make my repeater an observer on the mesh?](#38-q-how-do-i-make-my-repeater-an-observer-on-the-mesh)
 - [4. T-Deck Related](#4-t-deck-related)
   - [4.1. Q: Is there a user guide for T-Deck, T-Pager, T-Watch, or T-Display Pro?](#41-q-is-there-a-user-guide-for-t-deck-t-pager-t-watch-or-t-display-pro)
   - [4.2. Q: What are the steps to get a T-Deck into DFU (Device Firmware Update) mode?](#42-q-what-are-the-steps-to-get-a-t-deck-into-dfu-device-firmware-update-mode)
@@ -60,15 +55,28 @@ author: https://github.com/LitBomb<!-- omit from toc -->
   - [5.12. Q: How do I add a node to the MeshCore Map](#512-q-how-do-i-add-a-node-to-the-meshcore-map)
   - [5.13. Q: Can I use a Raspberry Pi to update a MeshCore radio?](#513-q-can-i-use-a-raspberry-pi-to-update-a-meshcore-radio)
   - [5.14. Q: Are there are projects built around MeshCore?](#514-q-are-there-are-projects-built-around-meshcore)
-    - [5.14.1. meshcoremqtt](#5141-meshcoremqtt)
-    - [5.14.2. MeshCore for Home Assistant](#5142-meshcore-for-home-assistant)
-    - [5.14.3. Python MeshCore](#5143-python-meshcore)
-    - [5.14.4. meshcore-cli](#5144-meshcore-cli)
-    - [5.14.5. meshcore.js](#5145-meshcorejs)
-    - [5.14.6. pyMC\_core](#5146-pymc_core)
-    - [5.14.7. MeshCore Packet Decoder](#5147-meshcore-packet-decoder)
-    - [5.14.8. meshcore-pi](#5148-meshcore-pi)
-    - [5.14.9. pyMC\_Repeater](#5149-pymc_repeater)
+    - [5.14.1. overview](#5141-overview)
+      - [5.14.1.1. awesome-meshcore](#51411-awesome-meshcore)
+    - [5.14.2. programming libraries, command line software](#5142-programming-libraries-command-line-software)
+      - [5.14.2.1. meshcoremqtt](#51421-meshcoremqtt)
+      - [5.14.2.2. MeshCore for Home Assistant](#51422-meshcore-for-home-assistant)
+      - [5.14.2.3. Python MeshCore](#51423-python-meshcore)
+      - [5.14.2.4. meshcore-cli](#51424-meshcore-cli)
+      - [5.14.2.5. meshcore.js](#51425-meshcorejs)
+      - [5.14.2.6. pyMC\_core](#51426-pymc_core)
+      - [5.14.2.7. MeshCore Packet Decoder](#51427-meshcore-packet-decoder)
+      - [5.14.2.8. meshcore-pi](#51428-meshcore-pi)
+      - [5.14.2.9. pyMC\_Repeater](#51429-pymc_repeater)
+      - [5.14.2.10. MeshCore map auto uploader](#514210-MeshCore-map-auto-uploader)
+    - [5.14.3. apps, graphical software](#5143-apps-graphical-software)
+      - [5.14.3.1. meshcore-open](#51431-meshcore-open)
+    - [5.14.4. firmwares](#5144-firmwares)
+      - [5.14.4.1. MeshCore-Cardputer-ADV](#51441-MeshCore-Cardputer-ADV)
+      - [5.14.4.2. LunarCore](#51442-LunarCore)
+      - [5.14.4.3. MC-Term](#51443-MC-Term)
+      - [5.14.4.4. Meck](#51444-Meck)
+      - [5.14.4.5. Meshcore for Wio Tracker L1 Pro](#51445-Meshcore-for-Wio-Tracker-L1-Pro)
+    - [5.14.5. online services](#5145-online-services)
   - [5.15. Q: Are there client applications for Windows or Mac?](#515-q-are-there-client-applications-for-windows-or-mac)
   - [5.16. Q: Are there any resources that compare MeshCore to other LoRa systems?](#516-q-are-there-any-resources-that-compare-meshcore-to-other-lora-systems)
 - [6. Troubleshooting](#6-troubleshooting)
@@ -89,7 +97,6 @@ author: https://github.com/LitBomb<!-- omit from toc -->
   - [7.5. Q: What is the format of a contact or channel QR code?](#75-q-what-is-the-format-of-a-contact-or-channel-qr-code)
   - [7.6. Q: How do I connect to the companion via WIFI, e.g. using a heltec v3?](#76-q-how-do-i-connect-to-the-companion-via-wifi-eg-using-a-heltec-v3)
   - [7.7. Q: I have a Station G2, or a Heltec V4, or an Ikoka Stick, or a radio with a EByte E22-900M30S or a E22-900M33S module, what should their transmit power be set to?](#77-q-i-have-a-station-g2-or-a-heltec-v4-or-an-ikoka-stick-or-a-radio-with-a-ebyte-e22-900m30s-or-a-e22-900m33s-module-what-should-their-transmit-power-be-set-to)
-- [| | High Output | 22 dBm | 28 dBm | |](#--high-output--22-dbm--28-dbm--)
 
 ## 1. Introduction
 
@@ -112,15 +119,15 @@ Anyone is able to build anything they like on top of MeshCore without paying any
 
 ### 1.2. Q: What do you need to start using MeshCore?
 **A:** Everything you need for MeshCore is available at:
- Main web site: [https://meshcore.co.uk/](https://meshcore.co.uk/)
- Firmware Flasher: https://flasher.meshcore.co.uk/
- Phone Client Applications: https://meshcore.co.uk/apps.html
- MeshCore Firmware GitHub: https://github.com/ripplebiz/MeshCore
 
- NOTE: Andy Kirby has a very useful [intro video](https://www.youtube.com/watch?v=t1qne8uJBAc) for beginners.
+- Main web site: [https://meshcore.co.uk](https://meshcore.co.uk)
+- Firmware Flasher: [https://flasher.meshcore.co.uk](https://flasher.meshcore.co.uk)
+- MeshCore Firmware on GitHub: [https://github.com/meshcore-dev/MeshCore](https://github.com/meshcore-dev/MeshCore)
+- MeshCore Companion App: [https://meshcore.nz](https://meshcore.nz)
+- MeshCore Map: [https://meshcore.co.uk/map.html](https://meshcore.co.uk/map.html)
+- Andy Kirby has a very useful [intro video](https://www.youtube.com/watch?v=t1qne8uJBAc) for beginners.
 
-
- You need LoRa hardware devices to run MeshCore firmware as clients or server (repeater and room server).
+You need LoRa hardware devices to run MeshCore firmware as clients or server (repeater and room server).
 
 #### 1.2.1. Hardware
 MeshCore is available on a variety of 433MHz, 868MHz and 915MHz LoRa devices. For example, Lilygo T-Deck, T-Pager, RAK Wireless WisBlock RAK4631 devices (e.g. 19003, 19007, 19026), Heltec V3, Xiao S3 WIO, Xiao C3, Heltec T114, Station G2, Nano G2 Ultra, Seeed Studio T1000-E. More devices are being added regularly.
@@ -214,11 +221,11 @@ MeshCore allows you to manually broadcast your name, position and public encrypt
 * Zero hop means your advert is broadcasted out to anyone that can hear it, and that's it.
 * Flooded means it's broadcasted out and then repeated by all the repeaters that hear it.
 
-MeshCore clients only advertise themselves when the user initiates it. A repeater sends a flood advert once every 3 hours by default. This interval can be configured using the following command:
+MeshCore clients only advertise themselves when the user initiates it. A repeater sends a flood advert once every 12 hours by default. This interval can be configured using the following command:
 
-`set advert.interval {minutes}`
+`set flood.advert.interval {hours}`
 
-As of Aug 20 2025, a pending PR on github will change the flood advert to 12 hours to minimize airtime utilization caused by repeaters' flood adverts.
+The separate `set advert.interval {minutes}` command controls the local zero-hop advert timer.
 
 ### 2.5. Q: Is there a hop limit?
 
@@ -253,7 +260,9 @@ Repeater or room server can be administered with one of the options below:
 ### 3.2. Q: Do I need to set the location for a repeater?
 **A:** While not required, with location set for a repeater it will show up on the MeshCore map in the future. Set location with the following command:
 
-`set lat <GPS Lat> set long <GPS Lon>`
+`set lat <GPS Lat>`
+
+`set lon <GPS Lon>`
 
 You can get the latitude and longitude from Google Maps by right-clicking the location you are at on the map.
 
@@ -282,9 +291,9 @@ Reboot the repeater after `set prv.key <hex>` command for the new private key to
 **A:** You can generate a new private key and specific the first byte of its public key here:  https://gessaman.com/mc-keygen/
 
 
-### 3.7. Q: My repeater maybe suffering from deafness due to high power interference near my mesh's frequency, it is not hearing other in-range MeshCore radios.  what can I do?
+### 3.7. Q: My repeater maybe suffering from deafness due to high power interference near my mesh's frequency, it is not hearing other in-range MeshCore radios.  What can I do?
 
-**A:** This may be due to the SX1262 radio's auto gain control feature.  You can use this command to preiodically reset its AGC.  
+**A:** This may be due to the SX1262 radio's auto gain control feature.  You can use this command to periodically reset its AGC.  
 
 `set agc.reset.interval <number>`
 
@@ -293,9 +302,9 @@ The `<number>` unit is in seconds and is incremented by 4.  `set agc.reset.inter
 This is a very low cost operation.  AGC reset is done by simply setting `state = STATE_IDLE;` in function `RadioLibWrapper::resetAGC()` in `RadioLibWrappers.cpp`
 
 
-### 3.8 Q: How do I make my repeater an observer on the mesh
+### 3.8. Q: How do I make my repeater an observer on the mesh?
 
-**A:** The observer instruction is available here: https://analyzer.letsme.sh/observer/onboard
+**A:** The observer instruction is available here: https://analyzer.letsmesh.net/observer/onboard
 
 ---
 
@@ -535,7 +544,7 @@ MeshCore clients would need to reset path constantly and flood traffic across th
 This could change in the future if MeshCore develops a client firmware that repeats.
 [Source](https://discord.com/channels/826570251612323860/1330643963501351004/1354780032140054659)
 
-### 5.12. Q: How do I add a node to the [MeshCore Map]([url](https://meshcore.co.uk/map.html))
+### 5.12. Q: How do I add a node to the [MeshCore Map](https://meshcore.co.uk/map.html)
 **A:**
 
 To add a BLE Companion radio, connect to the BLE Companion radio from the MeshCore smartphone app.  In the app, tap the `3 dot` menu icon at the top right corner, then tap `Internet Map`.  Tap the `3 dot` menu icon again and choose `Add me to the Map`
@@ -609,44 +618,94 @@ From here, reference repeater and room server command line commands on MeshCore 
 
 ### 5.14. Q: Are there are projects built around MeshCore?
 
-**A:** Yes.  See the following:
+**A:** Yes. Some of them are listed below.
 
-#### 5.14.1. meshcoremqtt
-A Python script to send meshcore debug and packet capture data to MQTT for analysis.  Cisien's version is a fork of Andrew-a-g's and is being used to to collect data for https://map.w0z.is/messages and https://analyzer.letsme.sh/
+#### 5.14.1. overview
+
+Some resources that by themselves give overviews about MeshCore related projects:
+
+##### 5.14.1.1. awesome-meshcore
+A meta website/ git-repository collecting many projects related to MeshCore, grouped by type. See  
+https://github.com/samuk/awesome-meshcore.
+
+#### 5.14.2. programming libraries, command line software
+
+##### 5.14.2.1. meshcoremqtt
+A Python script to send meshcore debug and packet capture data to MQTT for analysis.  Cisien's version is a fork of Andrew-a-g's and is being used to to collect data for https://map.w0z.is/messages and https://analyzer.letsmesh.net/
 https://github.com/Cisien/meshcoretomqtt
 https://github.com/Andrew-a-g/meshcoretomqtt
 
-#### 5.14.2. MeshCore for Home Assistant
+##### 5.14.2.2. MeshCore for Home Assistant
 A custom Home Assistant integration for MeshCore mesh radio nodes. It allows you to monitor and control MeshCore nodes via USB, BLE, or TCP connections.
 https://github.com/awolden/meshcore-ha
 
-#### 5.14.3. Python MeshCore
+##### 5.14.2.3. Python MeshCore
 Bindings to access your MeshCore companion radio nodes in python.
 https://github.com/fdlamotte/meshcore_py
 
-#### 5.14.4. meshcore-cli
+##### 5.14.2.4. meshcore-cli
 CLI interface to MeshCore companion radio over BLE, TCP, or serial.  Uses Python MeshCore above.
  https://github.com/fdlamotte/meshcore-cli
 
-#### 5.14.5. meshcore.js
+##### 5.14.2.5. meshcore.js
 A JavaScript library for interacting with a MeshCore device running the companion radio firmware
 https://github.com/liamcottle/meshcore.js
 
-#### 5.14.6. pyMC_core
+##### 5.14.2.6. pyMC_core
 pyMC_Core is a Python port of MeshCore, designed for Raspberry Pi and similar hardware, it talks to LoRa modules over SPI.
 https://github.com/rightup/pyMC_core
 
-#### 5.14.7. MeshCore Packet Decoder
-A TypeScript library for decoding MeshCore mesh networking packets with full cryptographic support. Uses WebAssembly (WASM) for Ed25519 key derivation through the orlp/ed25519 library.  It powers the [MeshCore Packet Analyzer](https://analyzer.letsme.sh/packets).
+##### 5.14.2.7. MeshCore Packet Decoder
+A TypeScript library for decoding MeshCore mesh networking packets with full cryptographic support. Uses WebAssembly (WASM) for Ed25519 key derivation through the orlp/ed25519 library.  It powers the [MeshCore Packet Analyzer](https://analyzer.letsmesh.net/packets).
 https://github.com/michaelhart/meshcore-decoder
 
-#### 5.14.8. meshcore-pi
+##### 5.14.2.8. meshcore-pi
 meshcore-pi is another Python port of MeshCore, designed for Raspberry Pi and similar hardware, it talks to LoRa modules over SPI or GPIO.
 https://github.com/brianwiddas/meshcore-pi
 
-#### 5.14.9. pyMC_Repeater
+##### 5.14.2.9. pyMC_Repeater
 pyMC_Repeater is a repeater daemon in Python built on top of the [`pymc_core`](#5146-pymc_core) library.
 https://github.com/rightup/pyMC_Repeater
+
+##### 5.14.2.10. MeshCore map auto uploader
+A Node.js software that will upload every repeater or room server to [map.meshcore.dev](https://map.meshcore.dev/) when a connected companion hears new advert.  
+https://github.com/recrof/map.meshcore.dev-uploader
+
+#### 5.14.3. apps, graphical software
+
+##### 5.14.3.1. meshcore-open
+Open Source companion app for Android, iOS, GNU/Linux (and maybe other Unixes), Windows, macOS, chromium-based browsers.  
+https://github.com/zjs81/meshcore-open
+
+#### 5.14.4. firmwares
+
+##### 5.14.4.1. MeshCore-Cardputer-ADV
+Standalone client firmware for the "[M5Stack Cardputer ADV](https://docs.m5stack.com/en/core/Cardputer-Adv)" with the "[M5Stack Cap LoRa-1262](https://docs.m5stack.com/en/cap/Cap_LoRa-1262)" module.
+
+There are two variants:
+
+* https://github.com/Stachugit/MeshCore-Cardputer-ADV,
+* https://github.com/sosprz/meshcore-cardputer-adv.
+
+##### 5.14.4.2. LunarCore
+Multi-protocol mesh firmware for ESP32-S3 LoRa devices (MeshCore, Meshtastic, RNode/KISS (Reticulum)). Protocol is auto-detected from the first bytes over serial or BLE.  
+https://github.com/STCisGOOD/lunarcore
+
+##### 5.14.4.3. MC-Term
+(Soon to be) Open Source companion firmware for [LilyGO T-Deck (Plus)](https://lilygo.cc/en-us/products/t-deck-plus-1) and [Seeed Studio SenseCap Indicator (TFT / D1Pro)](https://www.seeedstudio.com/SenseCAP-Indicator-D1Pro-p-5644.html), that can be used both standalone and together with a companion app.  
+https://github.com/dabeani/meshcore
+
+##### 5.14.4.4. Meck
+Companion firmware for [LilyGo T-Deck Pro](https://lilygo.cc/products/t-deck-pro) that allows standalone operation and connection to a companion app via Bluetooth Low Energy (BLE).  
+https://github.com/pelgraine/Meck
+
+##### 5.14.4.5. Meshcore for Wio Tracker L1 Pro
+Companion firmware for [Seeed Studio Wio Tracker L1 Pro](https://www.seeedstudio.com/Wio-Tracker-L1-Pro-p-6454.html) with specific UI adjustments that can be used standalone.  
+https://github.com/sosprz/Meshcore-Wio-Tracker-L1-Pro
+
+#### 5.14.5. online services
+
+*(None yet listed here. See [overview ressources](#5141-overview).)*
 
 
 ### 5.15. Q: Are there client applications for Windows or Mac?
