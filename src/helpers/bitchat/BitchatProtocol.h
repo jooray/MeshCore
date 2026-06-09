@@ -5,7 +5,8 @@
 #include <string.h>
 
 // Bitchat Protocol Constants
-#define BITCHAT_HEADER_SIZE 14  // version(1) + type(1) + ttl(1) + timestamp(8) + flags(1) + payloadLength(2)
+#define BITCHAT_HEADER_SIZE 14  // v1: version(1) + type(1) + ttl(1) + timestamp(8) + flags(1) + payloadLength(2)
+#define BITCHAT_HEADER_SIZE_V2 16  // v2: same as v1 but payloadLength is 4 bytes
 #define BITCHAT_SIGNATURE_SIZE 64  // Ed25519 signature
 #define BITCHAT_MAX_WIRE_PAYLOAD_SIZE 245  // Max payload size on wire (compressed/padded)
 // Max decompressed payload size - reduced on NRF52 to save RAM (1KB vs 2KB)
@@ -14,7 +15,9 @@
 #else
   #define BITCHAT_MAX_PAYLOAD_SIZE 2048  // 2KB for other platforms
 #endif
-#define BITCHAT_VERSION 1
+#define BITCHAT_VERSION 1        // version we emit
+#define BITCHAT_VERSION_2 2      // v2 = 4-byte payloadLen + optional source route
+#define BITCHAT_VERSION_MAX 2    // highest version we can parse
 #define BITCHAT_SENDER_ID_SIZE 8
 #define BITCHAT_RECIPIENT_ID_SIZE 8
 
@@ -50,6 +53,7 @@ enum BitchatMessageType : uint8_t {
 #define BITCHAT_FLAG_HAS_RECIPIENT 0x01
 #define BITCHAT_FLAG_HAS_SIGNATURE 0x02
 #define BITCHAT_FLAG_IS_COMPRESSED 0x04
+#define BITCHAT_FLAG_HAS_ROUTE     0x08  // v2+ only: optional source route follows recipientID
 
 // Announce payload TLV types
 #define BITCHAT_TLV_NICKNAME 0x01

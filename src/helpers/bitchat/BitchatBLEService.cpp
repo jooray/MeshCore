@@ -435,8 +435,13 @@ bool BitchatBLEService::broadcastMessage(const BitchatMessage& msg) {
         return false;
     }
 
-    // Serialize message
-    uint8_t buffer[BITCHAT_MAX_MESSAGE_SIZE];
+    // Serialize message.
+    // Sized for a full single-notification message: a decompressed payload can exceed
+    // BITCHAT_MAX_WIRE_PAYLOAD_SIZE (e.g. a long #mesh message re-synced from history), so
+    // BITCHAT_MAX_MESSAGE_SIZE (which assumes the small wire payload) is too small and made
+    // serializeMessage() overflow this stack buffer. 512 covers anything that fits one BLE
+    // notification (MTU 517); larger messages are safely refused by serializeMessage() (len==0).
+    uint8_t buffer[512];
     size_t len = BitchatProtocol::serializeMessage(msg, buffer, sizeof(buffer));
     if (len == 0) {
         return false;

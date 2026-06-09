@@ -152,25 +152,44 @@ bool BitchatProtocol::parseMessage(const uint8_t* data, size_t length, BitchatMe
 
     size_t offset = 0;
 
-    // Parse header
+    // Parse header (v1: 2-byte payloadLength / 14-byte header; v2: 4-byte payloadLength / 16-byte header)
     msg.version = data[offset++];
     msg.type = data[offset++];
     msg.ttl = data[offset++];
     msg.timestamp = readBE64(&data[offset]);
     offset += 8;
     msg.flags = data[offset++];
-    msg.payloadLength = readBE16(&data[offset]);
+
+    uint32_t payloadLen;
+    if (msg.version >= BITCHAT_VERSION_2) {
+        if (length < BITCHAT_HEADER_SIZE_V2) {
+            Serial.println("REDUNDANT_DEBUG: parseMessage FAIL - too short for v2 header");
+            return false;
+        }
+        payloadLen = ((uint32_t)data[offset] << 24) | ((uint32_t)data[offset + 1] << 16)
+                   | ((uint32_t)data[offset + 2] << 8) | (uint32_t)data[offset + 3];
+        offset += 4;
+    } else {
+        payloadLen = readBE16(&data[offset]);
+        offset += 2;
+    }
+    // Our buffers index payload length as 16-bit; the bridge only handles small #mesh text,
+    // so reject any (v2) payload that wouldn't fit rather than truncating silently.
+    if (payloadLen > 0xFFFF) {
+        Serial.println("REDUNDANT_DEBUG: parseMessage FAIL - payloadLen too large");
+        return false;
+    }
+    msg.payloadLength = (uint16_t)payloadLen;
     msg.wirePayloadLength = msg.payloadLength;  // Store original wire length before decompression
-    offset += 2;
 
     Serial.printf("REDUNDANT_DEBUG: parseMessage HEADER: ver=%u type=0x%02X ttl=%u flags=0x%02X payloadLen=%u\n",
                   msg.version, msg.type, msg.ttl, msg.flags, msg.payloadLength);
     Serial.flush();
 
-    // Validate version
-    if (msg.version != BITCHAT_VERSION) {
-        Serial.printf("REDUNDANT_DEBUG: parseMessage FAIL - bad version %u (expected %u)\n",
-                      msg.version, BITCHAT_VERSION);
+    // Validate version (we can parse v1 and v2)
+    if (msg.version < 1 || msg.version > BITCHAT_VERSION_MAX) {
+        Serial.printf("REDUNDANT_DEBUG: parseMessage FAIL - bad version %u (max %u)\n",
+                      msg.version, BITCHAT_VERSION_MAX);
         return false;
     }
 
@@ -187,8 +206,10 @@ bool BitchatProtocol::parseMessage(const uint8_t* data, size_t length, BitchatMe
         return false;
     }
 
-    // Calculate expected message size
-    size_t expectedSize = BITCHAT_HEADER_SIZE + BITCHAT_SENDER_ID_SIZE;
+    // Calculate expected (minimum) message size. v2 has a 16-byte header; the optional v2
+    // source route is variable and validated separately below.
+    size_t headerSize = (msg.version >= BITCHAT_VERSION_2) ? BITCHAT_HEADER_SIZE_V2 : BITCHAT_HEADER_SIZE;
+    size_t expectedSize = headerSize + BITCHAT_SENDER_ID_SIZE;
     if (msg.hasRecipient()) {
         expectedSize += BITCHAT_RECIPIENT_ID_SIZE;
     }
@@ -214,6 +235,20 @@ bool BitchatProtocol::parseMessage(const uint8_t* data, size_t length, BitchatMe
     if (msg.hasRecipient()) {
         memcpy(msg.recipientId, &data[offset], BITCHAT_RECIPIENT_ID_SIZE);
         offset += BITCHAT_RECIPIENT_ID_SIZE;
+    }
+
+    // Skip optional v2 source route (HAS_ROUTE): 1-byte hop count + count*8-byte peer IDs.
+    // The bridge doesn't route, so we just advance past it. It sits between recipientID and payload.
+    if (msg.version >= BITCHAT_VERSION_2 && (msg.flags & BITCHAT_FLAG_HAS_ROUTE)) {
+        if (offset >= length) {
+            return false;
+        }
+        uint8_t routeCount = data[offset];
+        size_t routeBytes = 1 + (size_t)routeCount * BITCHAT_SENDER_ID_SIZE;
+        if (length < expectedSize + routeBytes) {
+            return false;  // route bytes are extra, on top of the minimum size
+        }
+        offset += routeBytes;
     }
 
     // Parse payload
@@ -365,7 +400,14 @@ bool BitchatProtocol::parseMessage(const uint8_t* data, size_t length, BitchatMe
 }
 
 size_t BitchatProtocol::serializeMessage(const BitchatMessage& msg, uint8_t* buffer, size_t maxLength) {
-    size_t requiredSize = getMessageSize(msg);
+    // Required size must reflect the bytes we actually WRITE below, which use the
+    // (possibly decompressed) payloadLength - NOT getMessageSize(), which returns the
+    // compressed on-wire size and would under-count for decompressed messages, letting
+    // the writes below overflow the caller's buffer (stack-smash on long synced messages).
+    size_t requiredSize = BITCHAT_HEADER_SIZE + BITCHAT_SENDER_ID_SIZE
+                        + (msg.hasRecipient() ? BITCHAT_RECIPIENT_ID_SIZE : 0)
+                        + msg.payloadLength
+                        + (msg.hasSignature() ? BITCHAT_SIGNATURE_SIZE : 0);
     if (maxLength < requiredSize) {
         return 0;
     }
@@ -469,6 +511,8 @@ size_t BitchatProtocol::getMessageSize(const BitchatMessage& msg) {
 
     // Use wirePayloadLength for wire size calculation (important for compressed messages)
     // After decompression, payloadLength has decompressed size but wirePayloadLength has original wire size
+    // NOTE: this returns the ON-WIRE size and is used to advance the parser; serializeMessage()
+    // computes its own required size from payloadLength (the bytes it actually writes).
     size += (msg.wirePayloadLength > 0) ? msg.wirePayloadLength : msg.payloadLength;
 
     if (msg.hasSignature()) {
