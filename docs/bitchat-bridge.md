@@ -236,8 +236,11 @@ What the bridge implements:
 
 Known gaps against current Bitchat builds:
 
-- Announces proxied for MeshCore contacts (`onMeshcoreAdvert`) are unsigned and cannot be
-  signed by the bridge, so modern apps reject them. Only the bridge's own peer appears.
+- MeshCore nodes do not appear as individual Bitchat peers. An announce must be signed by
+  the key it announces, which the bridge cannot do on another node's behalf, so proxying
+  identities is impossible by design — MeshCore senders are named inside the message text
+  instead. Advertising the bridge itself (capability bit + `bridgeGeohash` TLV `0x06`)
+  would be the supported way to expose it as a gateway.
 - No Noise session support: private messages to/from the bridge peer are not possible,
   only the `#mesh` channel.
 - Capability bit `PRIVATE_MEDIA` is not advertised (private media transfer unsupported).

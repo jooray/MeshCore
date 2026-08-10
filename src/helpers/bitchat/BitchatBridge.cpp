@@ -86,7 +86,6 @@ static char g_senderNick[64];                // For message parsing
 static char g_messageContent[2048];          // For message content
 static char g_channelName[32];               // For channel name
 static char g_meshTxContent[200];            // For mesh→bitchat relay
-static uint8_t g_peerNoiseKey[32];           // For peer noise key
 
 // PKCS#7 padding for Bitchat protocol signing (must match Android/iOS)
 // Block sizes: 256, 512, 1024, 2048 bytes
@@ -2012,77 +2011,6 @@ void BitchatBridge::onMeshcoreGroupMessage(const mesh::GroupChannel& channel, ui
     bool sent = _bleService.broadcastMessage(g_msgBuffer);
     BITCHAT_DEBUG_PRINTLN("TX to Bitchat: %s (result=%d, added to dedup)", senderName, sent ? 1 : 0);
     Serial.println("BITCHAT_BRIDGE: <<< onMeshcoreGroupMessage() EXIT <<<");
-#endif
-}
-
-void BitchatBridge::onMeshcoreDirectMessage(const uint8_t* senderPubKey, uint32_t timestamp, const char* text) {
-#if defined(ESP32) || defined(NRF52_PLATFORM)
-    if (!_bleService.hasConnectedClient()) {
-        return;
-    }
-
-    // Derive sender's Bitchat ID from their public key
-    uint64_t senderId = 0;
-    for (int i = 0; i < 8; i++) {
-        senderId |= (static_cast<uint64_t>(senderPubKey[i]) << (i * 8));
-    }
-
-    // Create Bitchat DM - use global buffer to avoid stack overflow on NRF52
-    g_msgBuffer.version = BITCHAT_VERSION;
-    g_msgBuffer.type = BITCHAT_MSG_MESSAGE;
-    g_msgBuffer.ttl = DEFAULT_TTL;
-    g_msgBuffer.timestamp = static_cast<uint64_t>(timestamp) * 1000ULL;
-    g_msgBuffer.flags = BITCHAT_FLAG_HAS_RECIPIENT;
-    g_msgBuffer.setSenderId64(senderId);
-    g_msgBuffer.setRecipientId64(_bitchatPeerId);  // Recipient is us (relaying to BLE client)
-
-    size_t textLen = strlen(text);
-    if (textLen > BITCHAT_MAX_PAYLOAD_SIZE) textLen = BITCHAT_MAX_PAYLOAD_SIZE;
-    memcpy(g_msgBuffer.payload, text, textLen);
-    g_msgBuffer.payloadLength = static_cast<uint16_t>(textLen);
-
-    _bleService.broadcastMessage(g_msgBuffer);
-    BITCHAT_DEBUG_PRINTLN("Sent DM to Bitchat from %08lX", (unsigned long)(senderId & 0xFFFFFFFF));
-#endif
-}
-
-void BitchatBridge::onMeshcoreAdvert(const mesh::Identity& id, uint32_t timestamp,
-                                      const uint8_t* appData, size_t appDataLen) {
-#if defined(ESP32) || defined(NRF52_PLATFORM)
-    if (!_bleService.hasConnectedClient()) {
-        return;
-    }
-
-    // Extract name from app data if available
-    const char* name = "Unknown";
-    if (appData != nullptr && appDataLen > 0) {
-        // Meshcore advert app_data often contains the node name
-        // This depends on how the advert was created
-        name = reinterpret_cast<const char*>(appData);
-    }
-
-    // Derive Curve25519 key from the peer's Ed25519 key
-    // Use global buffer to avoid stack overflow on NRF52
-    deriveNoisePublicKey(id.pub_key, g_peerNoiseKey);
-
-    // Peer ID must be bound to the Noise key, same as our own announce.
-    // NOTE: we can't sign on behalf of a Meshcore node, and current Bitchat builds
-    // reject unsigned announces, so these proxied adverts only reach older clients.
-    uint64_t peerId = derivePeerId(g_peerNoiseKey);
-
-    // Use global buffer to avoid stack overflow on NRF52
-    BitchatProtocol::createAnnounce(
-        g_msgBuffer,
-        peerId,
-        name,
-        g_peerNoiseKey,       // Curve25519 for Noise protocol
-        id.pub_key,           // Ed25519 for signatures
-        static_cast<uint64_t>(timestamp) * 1000ULL,
-        DEFAULT_TTL
-    );
-
-    _bleService.broadcastMessage(g_msgBuffer);
-    BITCHAT_DEBUG_PRINTLN("Sent Meshcore advert to Bitchat: %08lX", (unsigned long)(peerId & 0xFFFFFFFF));
 #endif
 }
 

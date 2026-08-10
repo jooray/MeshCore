@@ -106,26 +106,6 @@ public:
                                  const char* senderName, const char* text);
 
     /**
-     * Handle incoming Meshcore direct message
-     * Call this from onPeerDataRecv()
-     * @param senderPubKey Sender's public key
-     * @param timestamp Message timestamp
-     * @param text Message text
-     */
-    void onMeshcoreDirectMessage(const uint8_t* senderPubKey, uint32_t timestamp, const char* text);
-
-    /**
-     * Handle incoming Meshcore advertisement
-     * Call this from onAdvertRecv()
-     * @param id Sender's identity
-     * @param timestamp Advertisement timestamp
-     * @param appData Additional data from advertisement
-     * @param appDataLen Length of additional data
-     */
-    void onMeshcoreAdvert(const mesh::Identity& id, uint32_t timestamp,
-                          const uint8_t* appData, size_t appDataLen);
-
-    /**
      * Set the default channel name for Bitchat
      * @param channelName Channel name without # prefix
      */
@@ -239,8 +219,10 @@ private:
     uint32_t _lastAnnounceTime;
     volatile bool _pendingAnnounce;  // Flag to defer announcement to main loop (BLE callback has limited stack)
     volatile bool _processingMessage;  // Guard against re-entrant message processing (prevents stack explosion)
-    static const uint32_t ANNOUNCE_INTERVAL_MS = 5000;  // 5 seconds when idle
-    static const uint32_t ANNOUNCE_INTERVAL_CONNECTED_MS = 3000;  // 3 seconds when client connected
+    // Matches the app's own policy: announce often while undiscovered, then back off to
+    // keepalive once a client is connected and already knows us.
+    static const uint32_t ANNOUNCE_INTERVAL_MS = 4000;  // 4 seconds when no client connected
+    static const uint32_t ANNOUNCE_INTERVAL_CONNECTED_MS = 15000;  // 15 seconds when client connected
 
     // Fragment reassembly deferred processing (to avoid re-entrant call chains)
     // Static to keep ~1.1KB out of heap allocation
