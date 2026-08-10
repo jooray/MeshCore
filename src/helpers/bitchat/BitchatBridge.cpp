@@ -215,11 +215,11 @@ BitchatBridge::BitchatBridge(mesh::Mesh& mesh, mesh::LocalIdentity& identity, co
 void BitchatBridge::begin() {
     STACK_CHECKPOINT("begin() entry");
 
-    // Derive Bitchat peer ID from Meshcore identity
-    _bitchatPeerId = derivePeerId(_identity);
-
     // Derive Noise public key (Curve25519) from Ed25519 identity
     deriveNoisePublicKey(_identity.pub_key, _noisePublicKey);
+
+    // Derive Bitchat peer ID from the Noise public key (the app requires this binding)
+    _bitchatPeerId = derivePeerId(_noisePublicKey);
 
     // Configure the #mesh channel for relaying
     configureMeshChannel();
@@ -489,11 +489,16 @@ void BitchatBridge::handleRequestSync(const BitchatMessage& msg) {
                           sent, skipped, hasFilter ? "yes" : "no");
 }
 
-uint64_t BitchatBridge::derivePeerId(const mesh::LocalIdentity& identity) {
-    // Use first 8 bytes of public key as peer ID
+uint64_t BitchatBridge::derivePeerId(const uint8_t* noisePublicKey) {
+    // Bitchat derives the peer ID from the Noise static (Curve25519) key:
+    // peerID = first 8 bytes of SHA-256(noise public key), sent little-endian in senderID.
+    // The app rejects any ANNOUNCE whose senderID doesn't match this derivation.
+    uint8_t hash[32];
+    mesh::Utils::sha256(hash, sizeof(hash), noisePublicKey, 32);
+
     uint64_t id = 0;
     for (int i = 0; i < 8; i++) {
-        id |= (static_cast<uint64_t>(identity.pub_key[i]) << (i * 8));
+        id |= (static_cast<uint64_t>(hash[i]) << (i * 8));
     }
     return id;
 }
@@ -960,10 +965,21 @@ uint64_t BitchatBridge::getCurrentTimeMs() {
         return static_cast<uint64_t>(static_cast<int64_t>(millis()) + _timeOffset);
     }
 
-    // Fallback: use a hardcoded reasonable timestamp (Jan 1, 2026) + millis
-    // This is just for bootstrapping - we'll sync properly once we hear from Bitchat peers
-    // Jan 1, 2026 00:00:00 UTC = 1767225600 seconds
-    const uint64_t BOOTSTRAP_TIME_MS = 1767225600000ULL;
+    // Next best source: the Meshcore RTC (set by the companion app / GPS / RTC chip).
+    // Bitchat rejects announces more than 10 minutes off wall clock, so a plausible
+    // RTC value is much better than a hardcoded bootstrap date.
+    const uint32_t MIN_PLAUSIBLE_EPOCH = 1767225600UL;  // Jan 1, 2026
+    mesh::RTCClock* rtc = _mesh.getRTCClock();
+    if (rtc != NULL) {
+        uint32_t now = rtc->getCurrentTime();
+        if (now > MIN_PLAUSIBLE_EPOCH) {
+            return static_cast<uint64_t>(now) * 1000ULL;
+        }
+    }
+
+    // Fallback: hardcoded date + millis. Announces will be rejected by current Bitchat
+    // builds until we hear a peer packet and sync, but the bridge still receives.
+    const uint64_t BOOTSTRAP_TIME_MS = (uint64_t)MIN_PLAUSIBLE_EPOCH * 1000ULL;
     return BOOTSTRAP_TIME_MS + millis();
 #else
     return 0;
@@ -1247,6 +1263,11 @@ void BitchatBridge::processBitchatMessage(const BitchatMessage& msg) {
         case BITCHAT_MSG_FILE_TRANSFER:
             // File transfers (images, etc.) are not supported on mesh
             BITCHAT_DEBUG_PRINTLN("Skipping file transfer (not supported)");
+            break;
+
+        case BITCHAT_MSG_VOICE_FRAME:
+            // Live push-to-talk audio: ephemeral and far too large for LoRa
+            BITCHAT_DEBUG_PRINTLN("Skipping voice frame (not supported)");
             break;
 
         case BITCHAT_MSG_FRAGMENT_NEW:
@@ -2032,12 +2053,6 @@ void BitchatBridge::onMeshcoreAdvert(const mesh::Identity& id, uint32_t timestam
         return;
     }
 
-    // Convert Meshcore advert to Bitchat announce
-    uint64_t peerId = 0;
-    for (int i = 0; i < 8; i++) {
-        peerId |= (static_cast<uint64_t>(id.pub_key[i]) << (i * 8));
-    }
-
     // Extract name from app data if available
     const char* name = "Unknown";
     if (appData != nullptr && appDataLen > 0) {
@@ -2049,6 +2064,11 @@ void BitchatBridge::onMeshcoreAdvert(const mesh::Identity& id, uint32_t timestam
     // Derive Curve25519 key from the peer's Ed25519 key
     // Use global buffer to avoid stack overflow on NRF52
     deriveNoisePublicKey(id.pub_key, g_peerNoiseKey);
+
+    // Peer ID must be bound to the Noise key, same as our own announce.
+    // NOTE: we can't sign on behalf of a Meshcore node, and current Bitchat builds
+    // reject unsigned announces, so these proxied adverts only reach older clients.
+    uint64_t peerId = derivePeerId(g_peerNoiseKey);
 
     // Use global buffer to avoid stack overflow on NRF52
     BitchatProtocol::createAnnounce(

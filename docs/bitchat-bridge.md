@@ -103,6 +103,15 @@ You probably used the same node with Meshcore Companion BLE node and
 your phone still connects to it. Unpair it in bluetooth settings.
 Bitchat does not require, nor supports pairing.
 
+If the BLE connection is fine but the peer never appears in the peer list, the app is
+most likely rejecting the bridge's ANNOUNCE. Current builds drop an announce when:
+
+- the clock is more than 10 minutes off — set the node's time from the MeshCore
+  companion app (or wait until the bridge syncs time from a received Bitchat packet);
+- the signal is below the app's RSSI threshold for its current power mode;
+- the announce is unsigned or its sender ID is not derived from the noise key
+  (see [Bitchat Protocol Baseline](#bitchat-protocol-baseline)).
+
 ## How It Works
 
 ### Channel Bridging
@@ -204,6 +213,34 @@ This matches MeshCore's hashtag room key derivation.
 - Peer announcement/discovery
 - REQUEST_SYNC handling (sends cached messages)
 - Fragment reassembly for long messages
+
+### Bitchat Protocol Baseline
+
+The bridge is written against the **Bitchat v2.0 binary protocol** (whitepaper dated
+2026-07-06), cross-checked against `permissionlesstech/bitchat-android` `main` as of
+**2026-08-10**.
+
+What the bridge implements:
+
+| Area | Bridge behaviour |
+|------|------------------|
+| Packet version | Emits **v1** (14-byte header, 2-byte payload length); parses v1 and v2, skipping the v2 source route (`HAS_ROUTE`). Both apps still accept v1 (`decode()` rejects only versions other than 1 and 2). |
+| Peer ID | `senderID` = first 8 bytes of `SHA-256(noise static public key)`, little-endian. **Mandatory** since bitchat-android #730 (2026-07-26): `AnnouncementIdentityValidator` rejects any ANNOUNCE whose senderID is not derived this way. |
+| Noise static key | Curve25519 key derived from the node's Ed25519 identity (birational map). No Noise handshake is implemented, so bridge DMs are not possible. |
+| Announce TLVs | `0x01` nickname, `0x02` noise pubkey, `0x03` Ed25519 signing key — all three required by the app. Optional `0x04` direct neighbours, `0x05` capabilities and `0x06` bridge geohash are not sent (the bridge supports none of those features; the decoders skip unknown TLVs). |
+| Signing | Ed25519 over the **PKCS#7-padded** encoding with TTL forced to `SYNC_TTL_HOPS = 0` and the signature omitted — still what `toBinaryDataForSigning()` produces. |
+| Padding | Apps switched to *selective* padding (June 2026): only Noise frames are padded on the wire. Receive path is unaffected — decoding tolerates padded and unpadded input, and the signing representation is still padded. |
+| TTL | Outgoing packets use TTL 7 (`MESSAGE_TTL_HOPS`). An announce is only registered as a direct-link neighbour when its TTL equals the app's max, so 8 would make the bridge look like a relayed peer. |
+| Timestamps | The app drops announces more than **10 minutes** off wall clock. The bridge uses, in order: time synced from received Bitchat packets, the MeshCore RTC, then a hardcoded fallback date. |
+| Ignored types | `FILE_TRANSFER` (0x22) and `VOICE_FRAME` (0x29, live push-to-talk) are dropped rather than bridged to LoRa. Unknown types are ignored. |
+
+Known gaps against current Bitchat builds:
+
+- Announces proxied for MeshCore contacts (`onMeshcoreAdvert`) are unsigned and cannot be
+  signed by the bridge, so modern apps reject them. Only the bridge's own peer appears.
+- No Noise session support: private messages to/from the bridge peer are not possible,
+  only the `#mesh` channel.
+- Capability bit `PRIVATE_MEDIA` is not advertised (private media transfer unsupported).
 
 ## Release Builds
 

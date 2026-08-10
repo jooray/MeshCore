@@ -257,8 +257,9 @@ private:
     uint32_t _messagesRelayed;
     uint32_t _duplicatesDropped;
 
-    // TTL for outgoing messages
-    static const uint8_t DEFAULT_TTL = 8;
+    // TTL for outgoing messages. Must match the app's MESSAGE_TTL_HOPS (7): the app only
+    // treats an ANNOUNCE as a direct-link observation when ttl == its own max TTL.
+    static const uint8_t DEFAULT_TTL = 7;
 
     // #mesh channel configuration
     mesh::GroupChannel _meshChannel;        // The MeshCore #mesh channel
@@ -377,7 +378,9 @@ private:
      * Derive Bitchat peer ID from Meshcore identity
      * Uses first 8 bytes of public key
      */
-    uint64_t derivePeerId(const mesh::LocalIdentity& identity);
+    // Bitchat binds the peer ID to the Noise static key: first 8 bytes of SHA-256(curve25519 pubkey).
+    // Announces whose senderID doesn't match are rejected by the app (AnnouncementIdentityValidator).
+    uint64_t derivePeerId(const uint8_t* noisePublicKey);
 
     /**
      * Derive Noise public key (Curve25519) from Ed25519 public key

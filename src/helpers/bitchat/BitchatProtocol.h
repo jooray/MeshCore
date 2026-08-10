@@ -46,6 +46,7 @@ enum BitchatMessageType : uint8_t {
     BITCHAT_MSG_FRAGMENT_NEW = 0x20,
     BITCHAT_MSG_REQUEST_SYNC = 0x21,
     BITCHAT_MSG_FILE_TRANSFER = 0x22,
+    BITCHAT_MSG_VOICE_FRAME = 0x29,   // ephemeral push-to-talk frame, never gossiped
     BITCHAT_MSG_FRAGMENT = 0xFF
 };
 
